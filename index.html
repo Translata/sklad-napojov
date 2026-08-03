@@ -265,23 +265,22 @@ function escapeHtml(s){
 }
 
 // ---------- AUTH ----------
+// Redirect-based flow (not popup): popups are unreliable on mobile Safari/in-app browsers.
 async function initMsal(){
   msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
   await msalInstance.initialize();
-  const accounts = msalInstance.getAllAccounts();
-  if(accounts.length > 0) account = accounts[0];
+  const redirectResult = await msalInstance.handleRedirectPromise();
+  if(redirectResult && redirectResult.account){
+    account = redirectResult.account;
+  } else {
+    const accounts = msalInstance.getAllAccounts();
+    if(accounts.length > 0) account = accounts[0];
+  }
 }
 
-async function prihlasit(){
+function prihlasit(){
   document.getElementById("auth-error").textContent = "";
-  try{
-    const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
-    account = result.account;
-    await spustitApp();
-  }catch(e){
-    console.error(e);
-    document.getElementById("auth-error").textContent = "Prihlásenie zlyhalo: " + e.message;
-  }
+  msalInstance.loginRedirect({ scopes: GRAPH_SCOPES });
 }
 
 function odhlasit(){
@@ -293,8 +292,9 @@ async function ziskajToken(){
     const result = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
     return result.accessToken;
   }catch(e){
-    const result = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES });
-    return result.accessToken;
+    // vyprsany/neplatny token - znova presmeruj na prihlasenie
+    await msalInstance.acquireTokenRedirect({ scopes: GRAPH_SCOPES });
+    return null;
   }
 }
 
