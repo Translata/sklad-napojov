@@ -418,7 +418,9 @@ async function spustitApp(){
   }catch(e){
     console.error(e);
     document.getElementById("loading-text").innerHTML =
-      `Chyba pri načítaní zo SharePointu:<br><span style="color:var(--danger)">${escapeHtml(e.message)}</span><br><br>Skontroluj, či bol udelený admin súhlas pre oprávnenie Sites.ReadWrite.All v Entra ID.`;
+      `Chyba pri načítaní zo SharePointu:<br><span style="color:var(--danger)">${escapeHtml(e.message)}</span><br><br>` +
+      `Ak si sa prihlásil ešte pred udelením admin súhlasu pre Sites.ReadWrite.All, skús sa odhlásiť a prihlásiť znova.<br><br>` +
+      `<button onclick="odhlasit()">Odhlásiť sa a skúsiť znova</button>`;
   }
 }
 
