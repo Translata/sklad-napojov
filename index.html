@@ -206,25 +206,29 @@
 
 <script>
 /*
-  BACKEND: Microsoft Graph / SharePoint zoznamy (nie localStorage).
+  BACKEND: jeden JSON subor v dokumentovej kniznici na SharePoint site.
   Site: https://translata.sharepoint.com/sites/liquidpositive
-  Zoznamy (auto-vytvorene pri prvom prihlaseni, ak chybaju):
-    - Napoje:    Title
-    - Prijmy:    Title, NapojId (text), Datum (dateOnly), Mnozstvo (number)
-    - Inventury: Title, NapojId (text), Datum (dateOnly), Stav (number) -- 1 riadok na napoj na datum inventury
+  Subor: sklad-data.json (v korenovej dokumentovej kniznici)
 
-  DATA (in-memory, nacitane z Graphu, rovnaky tvar ako predtym s localStorage):
+  Preco subor a nie SharePoint zoznamy: vytvorenie zoznamu cez Graph vyzaduje
+  na site uroven Full Control / Design. Zapis suboru do kniznice staci s beznym
+  Edit opravnenim, takze appka funguje pre vsetkych bez admin zasahu.
+
+  Kompromis: cely stav sa uklada naraz (last-write-wins). Ak by dvaja ludia
+  zapisali v tej istej sekunde, jeden zapis moze prepisat druhy.
+
+  DATA (in-memory aj presne tvar suboru):
   {
     drinks: [ { id, name } ],
     receipts: [ { id, drinkId, date: "YYYY-MM-DD", qty } ],
-    inventories: [ { id, date: "YYYY-MM-DD", counts: {drinkId: qty}, itemIds: {drinkId: spItemId} } ]
+    inventories: [ { id, date: "YYYY-MM-DD", counts: {drinkId: qty} } ]
   }
 
   Vydane za mesiac (medzi dvomi po sebe iducimi inventurami) =
     stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
 */
 
-const APP_VERSION = "v6";
+const APP_VERSION = "v7";
 
 const MSAL_CONFIG = {
   auth: {
@@ -237,15 +241,19 @@ const MSAL_CONFIG = {
 const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
 const SITE_HOSTNAME = "translata.sharepoint.com";
 const SITE_PATH = "/sites/liquidpositive";
+const DATA_FILE = "sklad-data.json";
 const DEFAULT_DRINKS = ["Orange","Marakuja","Granat","Pure","Cannabis","Cherry","Outlast"];
 
 let msalInstance = null;
 let account = null;
 let SITE_ID = null;
-let LIST_IDS = {};
 let currentScreen = "prijem";
 
 let DATA = { drinks: [], receipts: [], inventories: [] };
+
+function uid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+}
 
 function dnesISO(){
   const d = new Date();
@@ -338,85 +346,44 @@ async function ziskajSiteId(){
   return SITE_ID;
 }
 
-async function ensureLists(){
-  const existingResp = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists?$select=id,displayName`);
-  const existing = {};
-  existingResp.value.forEach(l => existing[l.displayName] = l.id);
-
-  const definicie = [
-    { displayName: "Napoje", columns: [] },
-    { displayName: "Prijmy", columns: [
-        { name: "NapojId", text: {} },
-        { name: "Datum", dateTime: { displayAs: "default", format: "dateOnly" } },
-        { name: "Mnozstvo", number: { decimalPlaces: "automatic" } }
-      ]
-    },
-    { displayName: "Inventury", columns: [
-        { name: "NapojId", text: {} },
-        { name: "Datum", dateTime: { displayAs: "default", format: "dateOnly" } },
-        { name: "Stav", number: { decimalPlaces: "automatic" } }
-      ]
-    }
-  ];
-
-  const listIds = {};
-  for(const def of definicie){
-    if(existing[def.displayName]){
-      listIds[def.displayName] = existing[def.displayName];
-    } else {
-      try{
-        const created = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists`, {
-          method: "POST",
-          body: JSON.stringify({ displayName: def.displayName, columns: def.columns, list: { template: "genericList" } })
-        });
-        listIds[def.displayName] = created.id;
-      }catch(e){
-        if(String(e.message).includes("403")){
-          throw new Error(`Nemáš právo vytvoriť zoznam "${def.displayName}" na tejto SharePoint site. Treba úroveň Full Control (Owner) alebo Design — Edit/Member nestačí. Detail: ${e.message}`);
-        }
-        throw e;
-      }
-    }
-  }
-  return listIds;
+function fileContentUrl(){
+  return `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${DATA_FILE}:/content`;
 }
 
-async function seedDrinksIfEmpty(){
-  const items = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items?$expand=fields&$top=999`);
-  if(items.value.length === 0){
-    for(const name of DEFAULT_DRINKS){
-      await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items`, {
-        method: "POST",
-        body: JSON.stringify({ fields: { Title: name } })
-      });
-    }
-  }
-}
-
+// Vrati true, ak subor este neexistuje (prvy beh).
 async function loadAllData(){
-  const [drinksResp, receiptsResp, inventoriesResp] = await Promise.all([
-    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items?$expand=fields&$top=999`),
-    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items?$expand=fields&$top=999`),
-    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items?$expand=fields&$top=999`)
-  ]);
+  const token = await ziskajToken();
+  const resp = await fetch(fileContentUrl(), { headers: { "Authorization": `Bearer ${token}` } });
 
-  DATA.drinks = drinksResp.value.map(i => ({ id: i.id, name: i.fields.Title }));
+  if(resp.status === 404){
+    DATA = { drinks: DEFAULT_DRINKS.map(name => ({ id: uid(), name })), receipts: [], inventories: [] };
+    return true;
+  }
+  if(!resp.ok){
+    const text = await resp.text();
+    throw new Error(`[${APP_VERSION}] Nepodarilo sa načítať ${DATA_FILE} (${resp.status}): ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
+  }
 
-  DATA.receipts = receiptsResp.value.map(i => ({
-    id: i.id,
-    drinkId: i.fields.NapojId,
-    date: (i.fields.Datum || "").slice(0,10),
-    qty: i.fields.Mnozstvo
-  }));
+  const nacitane = await resp.json();
+  DATA = {
+    drinks: nacitane.drinks || [],
+    receipts: nacitane.receipts || [],
+    inventories: (nacitane.inventories || []).sort((a,b)=> a.date.localeCompare(b.date))
+  };
+  return false;
+}
 
-  const invMap = {};
-  inventoriesResp.value.forEach(i => {
-    const date = (i.fields.Datum || "").slice(0,10);
-    if(!invMap[date]) invMap[date] = { id: date, date, counts: {}, itemIds: {} };
-    invMap[date].counts[i.fields.NapojId] = i.fields.Stav;
-    invMap[date].itemIds[i.fields.NapojId] = i.id;
+async function ulozData(){
+  const token = await ziskajToken();
+  const resp = await fetch(fileContentUrl(), {
+    method: "PUT",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(DATA, null, 2)
   });
-  DATA.inventories = Object.values(invMap).sort((a,b)=> a.date.localeCompare(b.date));
+  if(!resp.ok){
+    const text = await resp.text();
+    throw new Error(`[${APP_VERSION}] Nepodarilo sa uložiť ${DATA_FILE} (${resp.status}): ${text.slice(0,300)}`);
+  }
 }
 
 async function spustitApp(){
@@ -425,9 +392,8 @@ async function spustitApp(){
   document.getElementById("app-root").style.display = "none";
   try{
     await ziskajSiteId();
-    LIST_IDS = await ensureLists();
-    await seedDrinksIfEmpty();
-    await loadAllData();
+    const jePrvyBeh = await loadAllData();
+    if(jePrvyBeh) await ulozData();
 
     document.getElementById("app-loading").style.display = "none";
     document.getElementById("app-root").style.display = "block";
@@ -439,8 +405,7 @@ async function spustitApp(){
   }catch(e){
     console.error(e);
     document.getElementById("loading-text").innerHTML =
-      `Chyba pri načítaní zo SharePointu:<br><span style="color:var(--danger)">${escapeHtml(e.message)}</span><br><br>` +
-      `Ak si sa prihlásil ešte pred udelením admin súhlasu pre Sites.ReadWrite.All, skús sa odhlásiť a prihlásiť znova.<br><br>` +
+      `Chyba pri práci so SharePointom:<br><span style="color:var(--danger)">${escapeHtml(e.message)}</span><br><br>` +
       `<button onclick="odhlasit()">Odhlásiť sa a skúsiť znova</button>`;
   }
 }
@@ -487,15 +452,11 @@ async function pridajNapoj(){
   const input = document.getElementById("novy-napoj");
   const nazov = input.value.trim();
   if(!nazov){ ukazToast("Zadaj názov nápoja"); return; }
+  DATA.drinks.push({ id: uid(), name: nazov });
   try{
-    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items`, {
-      method: "POST",
-      body: JSON.stringify({ fields: { Title: nazov } })
-    });
+    await ulozData();
     input.value = "";
-    await loadAllData();
     obnovAktualnuObrazovku();
-    vykresliNapojSelect();
     ukazToast("Nápoj pridaný");
   }catch(e){ ukazToast("Chyba: " + e.message); }
 }
@@ -503,15 +464,10 @@ async function pridajNapoj(){
 async function premenujNapoj(id, novyNazov){
   const d = DATA.drinks.find(x=>x.id===id);
   if(!d) return;
-  const meno = novyNazov.trim() || d.name;
+  d.name = novyNazov.trim() || d.name;
   try{
-    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items/${id}/fields`, {
-      method: "PATCH",
-      body: JSON.stringify({ Title: meno })
-    });
-    await loadAllData();
+    await ulozData();
     obnovAktualnuObrazovku();
-    vykresliNapojSelect();
   }catch(e){ ukazToast("Chyba: " + e.message); }
 }
 
@@ -519,11 +475,10 @@ async function zmazNapoj(id){
   const d = DATA.drinks.find(x=>x.id===id);
   if(!d) return;
   if(!confirm(`Zmazať nápoj "${d.name}"? Historické záznamy s ním zostanú zachované, ale nebude sa dať vybrať pri nových zápisoch.`)) return;
+  DATA.drinks = DATA.drinks.filter(x=>x.id!==id);
   try{
-    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items/${id}`, { method: "DELETE" });
-    await loadAllData();
+    await ulozData();
     obnovAktualnuObrazovku();
-    vykresliNapojSelect();
   }catch(e){ ukazToast("Chyba: " + e.message); }
 }
 
@@ -541,19 +496,10 @@ async function ulozPrijem(){
   if(!datum){ ukazToast("Vyber dátum"); return; }
   if(!drinkId){ ukazToast("Vyber nápoj"); return; }
   if(!mnozstvo || mnozstvo<=0){ ukazToast("Zadaj platné množstvo"); return; }
-  const drink = DATA.drinks.find(x=>x.id===drinkId);
+  DATA.receipts.push({ id: uid(), drinkId, date: datum, qty: mnozstvo });
   try{
-    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items`, {
-      method: "POST",
-      body: JSON.stringify({ fields: {
-        Title: `${datum} ${drink ? drink.name : ""}`,
-        NapojId: drinkId,
-        Datum: datum,
-        Mnozstvo: mnozstvo
-      }})
-    });
+    await ulozData();
     document.getElementById("p-mnozstvo").value = "";
-    await loadAllData();
     obnovAktualnuObrazovku();
     ukazToast("Príjem uložený");
   }catch(e){ ukazToast("Chyba: " + e.message); }
@@ -580,9 +526,9 @@ function vykresliPosledneprijmy(){
 
 async function zmazPrijem(id){
   if(!confirm("Zmazať tento príjem?")) return;
+  DATA.receipts = DATA.receipts.filter(r=>r.id!==id);
   try{
-    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items/${id}`, { method: "DELETE" });
-    await loadAllData();
+    await ulozData();
     obnovAktualnuObrazovku();
   }catch(e){ ukazToast("Chyba: " + e.message); }
 }
@@ -629,28 +575,15 @@ async function ulozInventuru(){
   const existujuca = DATA.inventories.find(inv => inv.date === datum);
   if(existujuca && !confirm("Pre tento dátum už inventúra existuje. Prepísať?")) return;
 
-  ukazToast("Ukladám inventúru...");
+  if(existujuca){
+    existujuca.counts = hodnoty;
+  } else {
+    DATA.inventories.push({ id: uid(), date: datum, counts: hodnoty });
+    DATA.inventories.sort((a,b)=> a.date.localeCompare(b.date));
+  }
+
   try{
-    for(const d of DATA.drinks){
-      const existujuceId = existujuca ? existujuca.itemIds[d.id] : null;
-      if(existujuceId){
-        await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items/${existujuceId}/fields`, {
-          method: "PATCH",
-          body: JSON.stringify({ Stav: hodnoty[d.id] })
-        });
-      } else {
-        await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items`, {
-          method: "POST",
-          body: JSON.stringify({ fields: {
-            Title: `${datum} ${d.name}`,
-            NapojId: d.id,
-            Datum: datum,
-            Stav: hodnoty[d.id]
-          }})
-        });
-      }
-    }
-    await loadAllData();
+    await ulozData();
     ukazToast("Inventúra uložená");
     prepniObrazovku("prehlad");
   }catch(e){ ukazToast("Chyba: " + e.message); }
