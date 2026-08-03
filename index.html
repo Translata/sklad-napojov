@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Sklad nápojov</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.3/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --border:#e2e4e8; --text:#1c1e21; --muted:#6b7280;
+    --accent:#2563eb; --accent-dark:#1d4ed8; --danger:#dc2626; --ok:#16a34a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); padding-bottom:70px;
+  }
+  header{
+    background:var(--accent); color:#fff; padding:14px 16px; position:sticky; top:0; z-index:10;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  header h1{font-size:18px; margin:0; font-weight:600;}
+  header .user-info{font-size:12px; opacity:.9; display:flex; align-items:center; gap:8px;}
+  header .user-info button{
+    background:rgba(255,255,255,.2); color:#fff; padding:5px 10px; font-size:12px; font-weight:500;
+  }
+  main{padding:12px; max-width:720px; margin:0 auto;}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:14px; margin-bottom:12px;
+  }
+  .card h2{font-size:15px; margin:0 0 10px 0; color:var(--muted); text-transform:uppercase; letter-spacing:.03em;}
+  label{display:block; font-size:13px; color:var(--muted); margin:10px 0 4px;}
+  input[type=text], input[type=number], input[type=date], select{
+    width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--border);
+    border-radius:8px; background:#fff; color:var(--text);
+  }
+  button{
+    font-size:15px; padding:10px 16px; border-radius:8px; border:none; cursor:pointer;
+    background:var(--accent); color:#fff; font-weight:600;
+  }
+  button.secondary{background:#e5e7eb; color:var(--text);}
+  button.danger{background:var(--danger); color:#fff;}
+  button:disabled{opacity:.6; cursor:default;}
+  button:active{opacity:.85;}
+  .row{display:flex; gap:8px; flex-wrap:wrap;}
+  .row > *{flex:1;}
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th, td{padding:8px 6px; text-align:right; border-bottom:1px solid var(--border);}
+  th:first-child, td:first-child{text-align:left;}
+  th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase;}
+  .muted{color:var(--muted); font-size:13px;}
+  .tag{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#eef2ff; color:var(--accent-dark);}
+  nav.tabs{
+    position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--border);
+    display:flex; z-index:10;
+  }
+  nav.tabs button{
+    flex:1; background:none; color:var(--muted); border-radius:0; padding:10px 4px; font-size:11px;
+    font-weight:500; display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  nav.tabs button.active{color:var(--accent); font-weight:700;}
+  nav.tabs .icon{font-size:18px;}
+  .screen{display:none;}
+  .screen.active{display:block;}
+  .inv-grid{display:flex; flex-direction:column; gap:8px;}
+  .inv-item{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);}
+  .inv-item label{flex:1; margin:0; color:var(--text); font-size:15px;}
+  .inv-item input{width:100px;}
+  .list-item{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);}
+  .list-item:last-child{border-bottom:none;}
+  .empty{color:var(--muted); font-size:14px; text-align:center; padding:20px 0;}
+  .month-header{font-weight:700; margin:6px 0 2px; font-size:15px;}
+  .badge-out{color:var(--danger); font-weight:700;}
+  .toast{
+    position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#1c1e21; color:#fff;
+    padding:10px 18px; border-radius:8px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s;
+    z-index:20; max-width:90%; text-align:center;
+  }
+  .toast.show{opacity:1;}
+  .center-screen{
+    min-height:70vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px; gap:14px;
+  }
+  .center-screen p{color:var(--muted); max-width:320px;}
+  .spinner{
+    width:36px; height:36px; border-radius:50%; border:4px solid var(--border); border-top-color:var(--accent);
+    animation:spin 0.8s linear infinite;
+  }
+  @keyframes spin{ to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🥤 Sklad nápojov</h1>
+  <div class="user-info" id="user-info" style="display:none;"></div>
+</header>
+
+<!-- PRIHLASENIE -->
+<div id="auth-gate" class="center-screen" style="display:none;">
+  <p>Táto appka ukladá dáta do SharePoint zoznamov vo vašom M365 tenante. Prihlás sa cez svoj pracovný Microsoft účet.</p>
+  <button onclick="prihlasit()">Prihlásiť sa cez Microsoft</button>
+  <p id="auth-error" class="muted" style="color:var(--danger);"></p>
+</div>
+
+<!-- NACITAVANIE -->
+<div id="app-loading" class="center-screen" style="display:none;">
+  <div class="spinner"></div>
+  <p id="loading-text">Načítavam dáta zo SharePointu...</p>
+</div>
+
+<div id="app-root" style="display:none;">
+<main>
+
+  <!-- PRIJEM -->
+  <section id="screen-prijem" class="screen active">
+    <div class="card">
+      <h2>Rýchly príjem tovaru</h2>
+      <label for="p-datum">Dátum</label>
+      <input type="date" id="p-datum">
+      <label for="p-napoj">Nápoj</label>
+      <select id="p-napoj"></select>
+      <label for="p-mnozstvo">Množstvo</label>
+      <input type="number" id="p-mnozstvo" inputmode="numeric" placeholder="napr. 24">
+      <div class="row" style="margin-top:14px;">
+        <button onclick="ulozPrijem()">Uložiť príjem</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Posledné príjmy</h2>
+      <div id="posledne-prijmy"></div>
+    </div>
+  </section>
+
+  <!-- INVENTURA -->
+  <section id="screen-inventura" class="screen">
+    <div class="card">
+      <h2>Urobiť inventúru</h2>
+      <p class="muted">Zapíš fyzicky spočítaný stav pre všetkých 7 nápojov. Inventúra sa robí prvý pondelok v mesiaci.</p>
+      <label for="i-datum">Dátum inventúry</label>
+      <input type="date" id="i-datum">
+      <div class="inv-grid" id="inv-grid" style="margin-top:10px;"></div>
+      <div class="row" style="margin-top:14px;">
+        <button onclick="ulozInventuru()">Uložiť inventúru</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PREHLAD -->
+  <section id="screen-prehlad" class="screen">
+    <div class="card">
+      <h2>Aktuálny mesačný prehľad</h2>
+      <div id="prehlad-obsah"></div>
+    </div>
+  </section>
+
+  <!-- HISTORIA -->
+  <section id="screen-historia" class="screen">
+    <div class="card">
+      <h2>História inventúr</h2>
+      <div id="historia-obsah"></div>
+    </div>
+  </section>
+
+  <!-- NAPOJE -->
+  <section id="screen-napoje" class="screen">
+    <div class="card">
+      <h2>Zoznam nápojov</h2>
+      <div id="napoje-list"></div>
+    </div>
+    <div class="card">
+      <h2>Pridať nápoj</h2>
+      <input type="text" id="novy-napoj" placeholder="Názov nápoja">
+      <div class="row" style="margin-top:10px;">
+        <button onclick="pridajNapoj()">Pridať</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-screen="prijem" onclick="prepniObrazovku('prijem')">
+    <span class="icon">➕</span>Príjem
+  </button>
+  <button class="tab-btn" data-screen="inventura" onclick="prepniObrazovku('inventura')">
+    <span class="icon">📋</span>Inventúra
+  </button>
+  <button class="tab-btn" data-screen="prehlad" onclick="prepniObrazovku('prehlad')">
+    <span class="icon">📊</span>Prehľad
+  </button>
+  <button class="tab-btn" data-screen="historia" onclick="prepniObrazovku('historia')">
+    <span class="icon">🕘</span>História
+  </button>
+  <button class="tab-btn" data-screen="napoje" onclick="prepniObrazovku('napoje')">
+    <span class="icon">⚙️</span>Nápoje
+  </button>
+</nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/*
+  BACKEND: Microsoft Graph / SharePoint zoznamy (nie localStorage).
+  Site: https://translata.sharepoint.com/sites/liquidpositive
+  Zoznamy (auto-vytvorene pri prvom prihlaseni, ak chybaju):
+    - Napoje:    Title
+    - Prijmy:    Title, NapojId (text), Datum (dateOnly), Mnozstvo (number)
+    - Inventury: Title, NapojId (text), Datum (dateOnly), Stav (number) -- 1 riadok na napoj na datum inventury
+
+  DATA (in-memory, nacitane z Graphu, rovnaky tvar ako predtym s localStorage):
+  {
+    drinks: [ { id, name } ],
+    receipts: [ { id, drinkId, date: "YYYY-MM-DD", qty } ],
+    inventories: [ { id, date: "YYYY-MM-DD", counts: {drinkId: qty}, itemIds: {drinkId: spItemId} } ]
+  }
+
+  Vydane za mesiac (medzi dvomi po sebe iducimi inventurami) =
+    stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
+*/
+
+const MSAL_CONFIG = {
+  auth: {
+    clientId: "22026742-db1b-4ee6-877a-5b279b1e5775",
+    authority: "https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
+    redirectUri: window.location.origin + window.location.pathname
+  },
+  cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false }
+};
+const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
+const SITE_HOSTNAME = "translata.sharepoint.com";
+const SITE_PATH = "/sites/liquidpositive";
+const DEFAULT_DRINKS = ["Orange","Marakuja","Granat","Pure","Cannabis","Cherry","Outlast"];
+
+let msalInstance = null;
+let account = null;
+let SITE_ID = null;
+let LIST_IDS = {};
+let currentScreen = "prijem";
+
+let DATA = { drinks: [], receipts: [], inventories: [] };
+
+function dnesISO(){
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off*60000).toISOString().slice(0,10);
+}
+
+function formatDatum(iso){
+  const [y,m,d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function ukazToast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ---------- AUTH ----------
+function initMsal(){
+  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  const accounts = msalInstance.getAllAccounts();
+  if(accounts.length > 0) account = accounts[0];
+}
+
+async function prihlasit(){
+  document.getElementById("auth-error").textContent = "";
+  try{
+    const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
+    account = result.account;
+    await spustitApp();
+  }catch(e){
+    console.error(e);
+    document.getElementById("auth-error").textContent = "Prihlásenie zlyhalo: " + e.message;
+  }
+}
+
+function odhlasit(){
+  msalInstance.logoutRedirect();
+}
+
+async function ziskajToken(){
+  try{
+    const result = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
+    return result.accessToken;
+  }catch(e){
+    const result = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES });
+    return result.accessToken;
+  }
+}
+
+async function graphFetch(url, options={}){
+  const token = await ziskajToken();
+  const resp = await fetch(url, {
+    ...options,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  if(!resp.ok){
+    const text = await resp.text();
+    throw new Error(`Graph API chyba ${resp.status}: ${text.slice(0,300)}`);
+  }
+  if(resp.status === 204) return null;
+  return resp.json();
+}
+
+// ---------- SHAREPOINT BOOTSTRAP ----------
+async function ziskajSiteId(){
+  if(SITE_ID) return SITE_ID;
+  const data = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_HOSTNAME}:${SITE_PATH}`);
+  SITE_ID = data.id;
+  return SITE_ID;
+}
+
+async function ensureLists(){
+  const existingResp = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists?$select=id,displayName`);
+  const existing = {};
+  existingResp.value.forEach(l => existing[l.displayName] = l.id);
+
+  const definicie = [
+    { displayName: "Napoje", columns: [] },
+    { displayName: "Prijmy", columns: [
+        { name: "NapojId", text: {} },
+        { name: "Datum", dateTime: { displayAs: "default", format: "dateOnly" } },
+        { name: "Mnozstvo", number: { decimalPlaces: "automatic" } }
+      ]
+    },
+    { displayName: "Inventury", columns: [
+        { name: "NapojId", text: {} },
+        { name: "Datum", dateTime: { displayAs: "default", format: "dateOnly" } },
+        { name: "Stav", number: { decimalPlaces: "automatic" } }
+      ]
+    }
+  ];
+
+  const listIds = {};
+  for(const def of definicie){
+    if(existing[def.displayName]){
+      listIds[def.displayName] = existing[def.displayName];
+    } else {
+      const created = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists`, {
+        method: "POST",
+        body: JSON.stringify({ displayName: def.displayName, columns: def.columns, list: { template: "genericList" } })
+      });
+      listIds[def.displayName] = created.id;
+    }
+  }
+  return listIds;
+}
+
+async function seedDrinksIfEmpty(){
+  const items = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items?$expand=fields&$top=999`);
+  if(items.value.length === 0){
+    for(const name of DEFAULT_DRINKS){
+      await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items`, {
+        method: "POST",
+        body: JSON.stringify({ fields: { Title: name } })
+      });
+    }
+  }
+}
+
+async function loadAllData(){
+  const [drinksResp, receiptsResp, inventoriesResp] = await Promise.all([
+    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items?$expand=fields&$top=999`),
+    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items?$expand=fields&$top=999`),
+    graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items?$expand=fields&$top=999`)
+  ]);
+
+  DATA.drinks = drinksResp.value.map(i => ({ id: i.id, name: i.fields.Title }));
+
+  DATA.receipts = receiptsResp.value.map(i => ({
+    id: i.id,
+    drinkId: i.fields.NapojId,
+    date: (i.fields.Datum || "").slice(0,10),
+    qty: i.fields.Mnozstvo
+  }));
+
+  const invMap = {};
+  inventoriesResp.value.forEach(i => {
+    const date = (i.fields.Datum || "").slice(0,10);
+    if(!invMap[date]) invMap[date] = { id: date, date, counts: {}, itemIds: {} };
+    invMap[date].counts[i.fields.NapojId] = i.fields.Stav;
+    invMap[date].itemIds[i.fields.NapojId] = i.id;
+  });
+  DATA.inventories = Object.values(invMap).sort((a,b)=> a.date.localeCompare(b.date));
+}
+
+async function spustitApp(){
+  document.getElementById("auth-gate").style.display = "none";
+  document.getElementById("app-loading").style.display = "flex";
+  document.getElementById("app-root").style.display = "none";
+  try{
+    await ziskajSiteId();
+    LIST_IDS = await ensureLists();
+    await seedDrinksIfEmpty();
+    await loadAllData();
+
+    document.getElementById("app-loading").style.display = "none";
+    document.getElementById("app-root").style.display = "block";
+    const userInfo = document.getElementById("user-info");
+    userInfo.style.display = "flex";
+    userInfo.innerHTML = `<span>${escapeHtml(account.username || account.name || "")}</span><button onclick="odhlasit()">Odhlásiť</button>`;
+
+    prepniObrazovku("prijem");
+  }catch(e){
+    console.error(e);
+    document.getElementById("loading-text").innerHTML =
+      `Chyba pri načítaní zo SharePointu:<br><span style="color:var(--danger)">${escapeHtml(e.message)}</span><br><br>Skontroluj, či bol udelený admin súhlas pre oprávnenie Sites.ReadWrite.All v Entra ID.`;
+  }
+}
+
+// ---------- NAVIGACIA ----------
+function prepniObrazovku(nazov){
+  currentScreen = nazov;
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById("screen-"+nazov).classList.add("active");
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+  document.querySelector(`.tab-btn[data-screen="${nazov}"]`).classList.add("active");
+  if(nazov==="prehlad") vykresliPrehlad();
+  if(nazov==="historia") vykresliHistoriu();
+  if(nazov==="inventura") vykresliInventuruForm();
+  if(nazov==="napoje") vykresliNapoje();
+  if(nazov==="prijem") vykresliPrijemForm();
+}
+
+function obnovAktualnuObrazovku(){
+  prepniObrazovku(currentScreen);
+}
+
+// ---------- NAPOJE ----------
+function vykresliNapojSelect(){
+  const sel = document.getElementById("p-napoj");
+  sel.innerHTML = DATA.drinks.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+}
+
+function vykresliNapoje(){
+  const el = document.getElementById("napoje-list");
+  if(DATA.drinks.length===0){
+    el.innerHTML = '<div class="empty">Zatiaľ žiadne nápoje.</div>';
+    return;
+  }
+  el.innerHTML = DATA.drinks.map(d => `
+    <div class="list-item">
+      <input type="text" value="${escapeHtml(d.name)}" style="max-width:60%;" onchange="premenujNapoj('${d.id}', this.value)">
+      <button class="danger" onclick="zmazNapoj('${d.id}')">Zmazať</button>
+    </div>
+  `).join("");
+}
+
+async function pridajNapoj(){
+  const input = document.getElementById("novy-napoj");
+  const nazov = input.value.trim();
+  if(!nazov){ ukazToast("Zadaj názov nápoja"); return; }
+  try{
+    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items`, {
+      method: "POST",
+      body: JSON.stringify({ fields: { Title: nazov } })
+    });
+    input.value = "";
+    await loadAllData();
+    obnovAktualnuObrazovku();
+    vykresliNapojSelect();
+    ukazToast("Nápoj pridaný");
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+async function premenujNapoj(id, novyNazov){
+  const d = DATA.drinks.find(x=>x.id===id);
+  if(!d) return;
+  const meno = novyNazov.trim() || d.name;
+  try{
+    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items/${id}/fields`, {
+      method: "PATCH",
+      body: JSON.stringify({ Title: meno })
+    });
+    await loadAllData();
+    obnovAktualnuObrazovku();
+    vykresliNapojSelect();
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+async function zmazNapoj(id){
+  const d = DATA.drinks.find(x=>x.id===id);
+  if(!d) return;
+  if(!confirm(`Zmazať nápoj "${d.name}"? Historické záznamy s ním zostanú zachované, ale nebude sa dať vybrať pri nových zápisoch.`)) return;
+  try{
+    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Napoje}/items/${id}`, { method: "DELETE" });
+    await loadAllData();
+    obnovAktualnuObrazovku();
+    vykresliNapojSelect();
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+// ---------- PRIJEM ----------
+function vykresliPrijemForm(){
+  document.getElementById("p-datum").value = dnesISO();
+  vykresliNapojSelect();
+  vykresliPosledneprijmy();
+}
+
+async function ulozPrijem(){
+  const datum = document.getElementById("p-datum").value;
+  const drinkId = document.getElementById("p-napoj").value;
+  const mnozstvo = parseFloat(document.getElementById("p-mnozstvo").value);
+  if(!datum){ ukazToast("Vyber dátum"); return; }
+  if(!drinkId){ ukazToast("Vyber nápoj"); return; }
+  if(!mnozstvo || mnozstvo<=0){ ukazToast("Zadaj platné množstvo"); return; }
+  const drink = DATA.drinks.find(x=>x.id===drinkId);
+  try{
+    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items`, {
+      method: "POST",
+      body: JSON.stringify({ fields: {
+        Title: `${datum} ${drink ? drink.name : ""}`,
+        NapojId: drinkId,
+        Datum: datum,
+        Mnozstvo: mnozstvo
+      }})
+    });
+    document.getElementById("p-mnozstvo").value = "";
+    await loadAllData();
+    obnovAktualnuObrazovku();
+    ukazToast("Príjem uložený");
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+function vykresliPosledneprijmy(){
+  const el = document.getElementById("posledne-prijmy");
+  const posledne = [...DATA.receipts].sort((a,b)=> b.date.localeCompare(a.date) || 0).slice(0,10);
+  if(posledne.length===0){
+    el.innerHTML = '<div class="empty">Žiadne príjmy zatiaľ.</div>';
+    return;
+  }
+  el.innerHTML = posledne.map(r => {
+    const d = DATA.drinks.find(x=>x.id===r.drinkId);
+    return `<div class="list-item">
+      <span>${formatDatum(r.date)} — ${escapeHtml(d ? d.name : "neznámy nápoj")}</span>
+      <span class="row" style="flex:0; gap:8px; align-items:center;">
+        <b>${r.qty}</b>
+        <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="zmazPrijem('${r.id}')">×</button>
+      </span>
+    </div>`;
+  }).join("");
+}
+
+async function zmazPrijem(id){
+  if(!confirm("Zmazať tento príjem?")) return;
+  try{
+    await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Prijmy}/items/${id}`, { method: "DELETE" });
+    await loadAllData();
+    obnovAktualnuObrazovku();
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+// ---------- INVENTURA ----------
+function najblizsiPondelok(){
+  // predvyplni prvy pondelok aktualneho mesiaca
+  const d = new Date();
+  const rok = d.getFullYear(), mesiac = d.getMonth();
+  const dayOfWeek = new Date(rok, mesiac, 1).getDay();
+  const posun = (1 - dayOfWeek + 7) % 7;
+  const den = String(1 + posun).padStart(2,"0");
+  const mesiacStr = String(mesiac + 1).padStart(2,"0");
+  return `${rok}-${mesiacStr}-${den}`;
+}
+
+function vykresliInventuruForm(){
+  document.getElementById("i-datum").value = najblizsiPondelok();
+  const grid = document.getElementById("inv-grid");
+  if(DATA.drinks.length===0){
+    grid.innerHTML = '<div class="empty">Najprv pridaj nápoje v sekcii "Nápoje".</div>';
+    return;
+  }
+  grid.innerHTML = DATA.drinks.map(d => `
+    <div class="inv-item">
+      <label for="inv-${d.id}">${escapeHtml(d.name)}</label>
+      <input type="number" id="inv-${d.id}" inputmode="numeric" placeholder="ks">
+    </div>
+  `).join("");
+}
+
+async function ulozInventuru(){
+  const datum = document.getElementById("i-datum").value;
+  if(!datum){ ukazToast("Vyber dátum"); return; }
+  const hodnoty = {};
+  let chyba = false;
+  DATA.drinks.forEach(d => {
+    const val = document.getElementById(`inv-${d.id}`).value;
+    if(val === ""){ chyba = true; return; }
+    hodnoty[d.id] = parseFloat(val);
+  });
+  if(chyba){ ukazToast("Vyplň stav pre všetky nápoje"); return; }
+
+  const existujuca = DATA.inventories.find(inv => inv.date === datum);
+  if(existujuca && !confirm("Pre tento dátum už inventúra existuje. Prepísať?")) return;
+
+  ukazToast("Ukladám inventúru...");
+  try{
+    for(const d of DATA.drinks){
+      const existujuceId = existujuca ? existujuca.itemIds[d.id] : null;
+      if(existujuceId){
+        await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items/${existujuceId}/fields`, {
+          method: "PATCH",
+          body: JSON.stringify({ Stav: hodnoty[d.id] })
+        });
+      } else {
+        await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${LIST_IDS.Inventury}/items`, {
+          method: "POST",
+          body: JSON.stringify({ fields: {
+            Title: `${datum} ${d.name}`,
+            NapojId: d.id,
+            Datum: datum,
+            Stav: hodnoty[d.id]
+          }})
+        });
+      }
+    }
+    await loadAllData();
+    ukazToast("Inventúra uložená");
+    prepniObrazovku("prehlad");
+  }catch(e){ ukazToast("Chyba: " + e.message); }
+}
+
+// ---------- VYPOCET PREHLADU ----------
+function sucetPrijmov(drinkId, odDatumExclusive, doDatumInclusive){
+  return DATA.receipts
+    .filter(r => r.drinkId === drinkId && r.date > odDatumExclusive && r.date <= doDatumInclusive)
+    .reduce((s,r)=> s + r.qty, 0);
+}
+
+function vypocitajMesacnyPrehlad(indexInventury){
+  // indexInventury je index do zoradeneho DATA.inventories (podla datumu)
+  const inventories = [...DATA.inventories].sort((a,b)=> a.date.localeCompare(b.date));
+  const aktualna = inventories[indexInventury];
+  const predchadzajuca = indexInventury > 0 ? inventories[indexInventury-1] : null;
+  const odDatum = predchadzajuca ? predchadzajuca.date : "0000-00-00";
+
+  return DATA.drinks.map(d => {
+    const stavPredosly = predchadzajuca ? (predchadzajuca.counts[d.id] ?? 0) : 0;
+    const prijmy = sucetPrijmov(d.id, odDatum, aktualna.date);
+    const stavAktualny = aktualna.counts[d.id] ?? 0;
+    const vydane = stavPredosly + prijmy - stavAktualny;
+    return {
+      nazov: d.name,
+      stavPredosly,
+      prijmy,
+      stavAktualny,
+      vydane
+    };
+  });
+}
+
+function vykresliPrehlad(){
+  const el = document.getElementById("prehlad-obsah");
+  const inventories = [...DATA.inventories].sort((a,b)=> a.date.localeCompare(b.date));
+  if(inventories.length===0){
+    el.innerHTML = '<div class="empty">Zatiaľ neexistuje žiadna inventúra. Urob prvú inventúru v sekcii "Inventúra".</div>';
+    return;
+  }
+  const posledniIndex = inventories.length - 1;
+  const posledna = inventories[posledniIndex];
+  const predchadzajuca = posledniIndex > 0 ? inventories[posledniIndex-1] : null;
+  const riadky = vypocitajMesacnyPrehlad(posledniIndex);
+
+  let hlavicka = `<p class="muted">Inventúra: <b>${formatDatum(posledna.date)}</b>`;
+  hlavicka += predchadzajuca ? ` (predošlá: ${formatDatum(predchadzajuca.date)})</p>` : ` (prvá inventúra — nie je s čím porovnávať príjmy pred ňou)</p>`;
+
+  const tabulka = `
+    <table>
+      <thead>
+        <tr>
+          <th>Nápoj</th>
+          <th>Posl. inv.</th>
+          <th>Príjmy</th>
+          <th>Akt. inv.</th>
+          <th>Vydané</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${riadky.map(r => `
+          <tr>
+            <td>${escapeHtml(r.nazov)}</td>
+            <td>${r.stavPredosly}</td>
+            <td>${r.prijmy}</td>
+            <td>${r.stavAktualny}</td>
+            <td class="${r.vydane<0 ? 'badge-out':''}"><b>${r.vydane}</b></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+  el.innerHTML = hlavicka + tabulka;
+}
+
+// ---------- HISTORIA ----------
+function vykresliHistoriu(){
+  const el = document.getElementById("historia-obsah");
+  const inventories = [...DATA.inventories].sort((a,b)=> a.date.localeCompare(b.date));
+  if(inventories.length===0){
+    el.innerHTML = '<div class="empty">Žiadna história zatiaľ.</div>';
+    return;
+  }
+  let html = "";
+  for(let i = inventories.length - 1; i >= 0; i--){
+    const inv = inventories[i];
+    const predch = i > 0 ? inventories[i-1] : null;
+    const riadky = vypocitajMesacnyPrehlad(i);
+    html += `
+      <div class="month-header">📅 ${formatDatum(inv.date)} ${predch ? `<span class="tag">od ${formatDatum(predch.date)}</span>` : '<span class="tag">prvá inventúra</span>'}</div>
+      <table style="margin-bottom:16px;">
+        <thead>
+          <tr><th>Nápoj</th><th>Posl. inv.</th><th>Príjmy</th><th>Akt. inv.</th><th>Vydané</th></tr>
+        </thead>
+        <tbody>
+          ${riadky.map(r => `
+            <tr>
+              <td>${escapeHtml(r.nazov)}</td>
+              <td>${r.stavPredosly}</td>
+              <td>${r.prijmy}</td>
+              <td>${r.stavAktualny}</td>
+              <td class="${r.vydane<0 ? 'badge-out':''}"><b>${r.vydane}</b></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+  el.innerHTML = html;
+}
+
+// ---------- INIT ----------
+window.addEventListener("load", () => {
+  initMsal();
+  if(account){
+    spustitApp();
+  } else {
+    document.getElementById("auth-gate").style.display = "flex";
+  }
+});
+</script>
+</body>
+</html>
