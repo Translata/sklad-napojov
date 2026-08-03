@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Sklad nápojov</title>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.3/lib/msal-browser.min.js"></script>
 <style>
@@ -221,6 +224,8 @@
     stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
 */
 
+const APP_VERSION = "v6";
+
 const MSAL_CONFIG = {
   auth: {
     clientId: "22026742-db1b-4ee6-877a-5b279b1e5775",
@@ -319,7 +324,7 @@ async function graphFetch(url, options={}){
   });
   if(!resp.ok){
     const text = await resp.text();
-    throw new Error(`Graph API chyba ${resp.status} na ${options.method || "GET"} ${url}: ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
+    throw new Error(`[${APP_VERSION}] Graph API chyba ${resp.status} na ${options.method || "GET"} ${url}: ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
   }
   if(resp.status === 204) return null;
   return resp.json();
@@ -359,11 +364,18 @@ async function ensureLists(){
     if(existing[def.displayName]){
       listIds[def.displayName] = existing[def.displayName];
     } else {
-      const created = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists`, {
-        method: "POST",
-        body: JSON.stringify({ displayName: def.displayName, columns: def.columns, list: { template: "genericList" } })
-      });
-      listIds[def.displayName] = created.id;
+      try{
+        const created = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists`, {
+          method: "POST",
+          body: JSON.stringify({ displayName: def.displayName, columns: def.columns, list: { template: "genericList" } })
+        });
+        listIds[def.displayName] = created.id;
+      }catch(e){
+        if(String(e.message).includes("403")){
+          throw new Error(`Nemáš právo vytvoriť zoznam "${def.displayName}" na tejto SharePoint site. Treba úroveň Full Control (Owner) alebo Design — Edit/Member nestačí. Detail: ${e.message}`);
+        }
+        throw e;
+      }
     }
   }
   return listIds;
