@@ -265,8 +265,9 @@ function escapeHtml(s){
 }
 
 // ---------- AUTH ----------
-function initMsal(){
+async function initMsal(){
   msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  await msalInstance.initialize();
   const accounts = msalInstance.getAllAccounts();
   if(accounts.length > 0) account = accounts[0];
 }
@@ -740,8 +741,8 @@ function vykresliHistoriu(){
 }
 
 // ---------- INIT ----------
-window.addEventListener("load", () => {
-  initMsal();
+window.addEventListener("load", async () => {
+  await initMsal();
   if(account){
     spustitApp();
   } else {
