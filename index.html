@@ -237,7 +237,7 @@
     stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
 */
 
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 
 const MSAL_CONFIG = {
   auth: {
@@ -711,7 +711,7 @@ function vykresliHistoriu(){
     const predch = i > 0 ? inventories[i-1] : null;
     const riadky = vypocitajMesacnyPrehlad(i);
     html += `
-      <div class="month-header">📅 ${formatDatum(inv.date)} ${predch ? `<span class="tag">od ${formatDatum(predch.date)}</span>` : '<span class="tag">prvá inventúra</span>'}</div>
+      <div class="month-header">${formatDatum(inv.date)} ${predch ? `<span class="tag">od ${formatDatum(predch.date)}</span>` : ""}</div>
       <table style="margin-bottom:16px;">
         <thead>
           <tr><th>Nápoj</th><th>Posl. inv.</th><th>Príjmy</th><th>Akt. inv.</th><th>Vydané</th></tr>
