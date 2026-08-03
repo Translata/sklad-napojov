@@ -711,7 +711,7 @@ function vykresliHistoriu(){
   const el = document.getElementById("historia-obsah");
   const inventories = [...DATA.inventories].sort((a,b)=> a.date.localeCompare(b.date));
   if(inventories.length===0){
-    el.innerHTML = '<div class="empty">Žiadna história zatiaľ.</div>';
+    el.innerHTML = '<div class="empty">Žiadna história.</div>';
     return;
   }
   let html = "";
