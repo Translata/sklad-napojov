@@ -237,7 +237,7 @@
     stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
 */
 
-const APP_VERSION = "v8";
+const APP_VERSION = "v9";
 
 const MSAL_CONFIG = {
   auth: {
@@ -250,7 +250,8 @@ const MSAL_CONFIG = {
 const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
 const SITE_HOSTNAME = "translata.sharepoint.com";
 const SITE_PATH = "/sites/liquidpositive";
-const DATA_FILE = "sklad-data.json";
+const DATA_FOLDER = "Sklad-app";
+const DATA_FILE_PATH = `${DATA_FOLDER}/sklad-data.json`;
 const DEFAULT_DRINKS = ["Orange","Marakuja","Granat","Pure","Cannabis","Cherry","Outlast"];
 
 let msalInstance = null;
@@ -294,9 +295,22 @@ async function initMsal(){
   const redirectResult = await msalInstance.handleRedirectPromise();
   if(redirectResult && redirectResult.account){
     account = redirectResult.account;
-  } else {
-    const accounts = msalInstance.getAllAccounts();
-    if(accounts.length > 0) account = accounts[0];
+    return;
+  }
+  const accounts = msalInstance.getAllAccounts();
+  if(accounts.length > 0){
+    account = accounts[0];
+    return;
+  }
+  // Prvy beh v tomto prehliadaci - skus tiche prihlasenie cez existujucu Microsoft
+  // relaciu (napr. ak je uz clovek prihlaseny v Outlooku/SharePointe v tom istom
+  // prehliadaci). Na iOS Safari to casto zlyha kvoli ochrane sukromia (ITP) -
+  // vtedy jednoducho ostane zobrazene tlacidlo na prihlasenie.
+  try{
+    const result = await msalInstance.ssoSilent({ scopes: GRAPH_SCOPES });
+    account = result.account;
+  }catch(e){
+    // ziadna aktivna relacia - pouzivatel musi kliknut na tlacidlo
   }
 }
 
@@ -356,7 +370,20 @@ async function ziskajSiteId(){
 }
 
 function fileContentUrl(){
-  return `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${DATA_FILE}:/content`;
+  return `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${DATA_FILE_PATH}:/content`;
+}
+
+// PUT na cestu s priecinkom, ktory este neexistuje, zlyha - priecinok treba vytvorit vopred.
+async function ensureFolder(){
+  const check = await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${DATA_FOLDER}`).catch(e => {
+    if(String(e.message).includes("404")) return null;
+    throw e;
+  });
+  if(check) return;
+  await graphFetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root/children`, {
+    method: "POST",
+    body: JSON.stringify({ name: DATA_FOLDER, folder: {}, "@microsoft.graph.conflictBehavior": "replace" })
+  });
 }
 
 // Vrati true, ak subor este neexistuje (prvy beh).
@@ -370,7 +397,7 @@ async function loadAllData(){
   }
   if(!resp.ok){
     const text = await resp.text();
-    throw new Error(`[${APP_VERSION}] Nepodarilo sa načítať ${DATA_FILE} (${resp.status}): ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
+    throw new Error(`[${APP_VERSION}] Nepodarilo sa načítať ${DATA_FILE_PATH} (${resp.status}): ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
   }
 
   const nacitane = await resp.json();
@@ -391,7 +418,7 @@ async function ulozData(){
   });
   if(!resp.ok){
     const text = await resp.text();
-    throw new Error(`[${APP_VERSION}] Nepodarilo sa uložiť ${DATA_FILE} (${resp.status}): ${text.slice(0,300)}`);
+    throw new Error(`[${APP_VERSION}] Nepodarilo sa uložiť ${DATA_FILE_PATH} (${resp.status}): ${text.slice(0,300)}`);
   }
 }
 
@@ -401,6 +428,7 @@ async function spustitApp(){
   document.getElementById("app-root").style.display = "none";
   try{
     await ziskajSiteId();
+    await ensureFolder();
     const jePrvyBeh = await loadAllData();
     if(jePrvyBeh) await ulozData();
 
