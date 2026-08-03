@@ -319,7 +319,7 @@ async function graphFetch(url, options={}){
   });
   if(!resp.ok){
     const text = await resp.text();
-    throw new Error(`Graph API chyba ${resp.status}: ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
+    throw new Error(`Graph API chyba ${resp.status} na ${options.method || "GET"} ${url}: ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
   }
   if(resp.status === 204) return null;
   return resp.json();
