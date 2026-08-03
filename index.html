@@ -131,10 +131,7 @@
       <h2>Rýchly príjem tovaru</h2>
       <label for="p-datum">Dátum</label>
       <input type="date" id="p-datum">
-      <label for="p-napoj">Nápoj</label>
-      <select id="p-napoj"></select>
-      <label for="p-mnozstvo">Množstvo</label>
-      <input type="number" id="p-mnozstvo" inputmode="numeric" placeholder="napr. 24">
+      <div class="inv-grid" id="prijem-grid" style="margin-top:10px;"></div>
       <div class="row" style="margin-top:14px;">
         <button onclick="ulozPrijem()">Uložiť príjem</button>
       </div>
@@ -237,7 +234,7 @@
     stav_pri_predoslej_inventure + sucet_prijmov_v_intervale - stav_pri_aktualnej_inventure
 */
 
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 
 const MSAL_CONFIG = {
   auth: {
@@ -466,11 +463,6 @@ function obnovAktualnuObrazovku(){
 }
 
 // ---------- NAPOJE ----------
-function vykresliNapojSelect(){
-  const sel = document.getElementById("p-napoj");
-  sel.innerHTML = DATA.drinks.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
-}
-
 function vykresliNapoje(){
   const el = document.getElementById("napoje-list");
   if(DATA.drinks.length===0){
@@ -522,21 +514,37 @@ async function zmazNapoj(id){
 // ---------- PRIJEM ----------
 function vykresliPrijemForm(){
   document.getElementById("p-datum").value = dnesISO();
-  vykresliNapojSelect();
+  const grid = document.getElementById("prijem-grid");
+  if(DATA.drinks.length===0){
+    grid.innerHTML = '<div class="empty">Najprv pridaj nápoje v sekcii "Nápoje".</div>';
+  } else {
+    grid.innerHTML = DATA.drinks.map(d => `
+      <div class="inv-item">
+        <label for="prijem-${d.id}">${escapeHtml(d.name)}</label>
+        <input type="number" id="prijem-${d.id}" inputmode="numeric" placeholder="ks">
+      </div>
+    `).join("");
+  }
   vykresliPosledneprijmy();
 }
 
 async function ulozPrijem(){
   const datum = document.getElementById("p-datum").value;
-  const drinkId = document.getElementById("p-napoj").value;
-  const mnozstvo = parseFloat(document.getElementById("p-mnozstvo").value);
   if(!datum){ ukazToast("Vyber dátum"); return; }
-  if(!drinkId){ ukazToast("Vyber nápoj"); return; }
-  if(!mnozstvo || mnozstvo<=0){ ukazToast("Zadaj platné množstvo"); return; }
-  DATA.receipts.push({ id: uid(), drinkId, date: datum, qty: mnozstvo });
+
+  const noveTPrijmy = [];
+  DATA.drinks.forEach(d => {
+    const val = document.getElementById(`prijem-${d.id}`).value;
+    const mnozstvo = parseFloat(val);
+    if(val !== "" && mnozstvo > 0){
+      noveTPrijmy.push({ id: uid(), drinkId: d.id, date: datum, qty: mnozstvo });
+    }
+  });
+  if(noveTPrijmy.length === 0){ ukazToast("Zadaj množstvo aspoň pre jeden nápoj"); return; }
+
+  DATA.receipts.push(...noveTPrijmy);
   try{
     await ulozData();
-    document.getElementById("p-mnozstvo").value = "";
     obnovAktualnuObrazovku();
     ukazToast("Príjem uložený");
   }catch(e){ ukazToast("Chyba: " + e.message); }
