@@ -298,6 +298,15 @@ async function ziskajToken(){
   }
 }
 
+function dekodujTokenInfo(token){
+  try{
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    return `upn=${payload.upn || payload.unique_name || payload.preferred_username || "?"}, scp=${payload.scp || "(žiadne scp - možno app-only token)"}`;
+  }catch(e){
+    return "(token sa nepodarilo dekódovať)";
+  }
+}
+
 async function graphFetch(url, options={}){
   const token = await ziskajToken();
   const resp = await fetch(url, {
@@ -310,7 +319,7 @@ async function graphFetch(url, options={}){
   });
   if(!resp.ok){
     const text = await resp.text();
-    throw new Error(`Graph API chyba ${resp.status}: ${text.slice(0,300)}`);
+    throw new Error(`Graph API chyba ${resp.status}: ${text.slice(0,300)} | token: ${dekodujTokenInfo(token)}`);
   }
   if(resp.status === 204) return null;
   return resp.json();
