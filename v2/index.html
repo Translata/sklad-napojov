@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Sklad nápojov v2</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.3/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --border:#e2e4e8; --text:#1c1e21; --muted:#6b7280;
+    --accent:#2563eb; --accent-soft:#e8efff; --danger:#c2362b; --danger-soft:#fdeceb;
+    --ok:#15803d; --ok-soft:#e3f4e8; --warn:#9a5b00; --warn-soft:#fdf0d8;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg);
+    color:var(--text); padding-bottom:76px; font-size:15px;}
+  header{background:var(--accent); color:#fff; padding:12px 16px; position:sticky; top:0; z-index:10;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  header h1{font-size:18px; margin:0; font-weight:600;}
+  header .right{display:flex; align-items:center; gap:8px; font-size:12px;}
+  header .right button{background:rgba(255,255,255,.2); color:#fff; padding:5px 10px; font-size:12px; font-weight:500;}
+  main{padding:12px; max-width:760px; margin:0 auto;}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:12px;}
+  .card h2{font-size:13px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+  h3{font-size:16px; margin:0;}
+  label{display:block; font-size:13px; color:var(--muted); margin:10px 0 4px;}
+  input[type=text], input[type=number], input[type=date], select, textarea{
+    width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--border); border-radius:8px;
+    background:#fff; color:var(--text); font-family:inherit;}
+  input[type=date]{-webkit-appearance:none; appearance:none; text-align:left; min-height:44px; display:block;}
+  input[type=date]::-webkit-date-and-time-value{text-align:left;}
+  textarea{min-height:64px; resize:vertical;}
+  button{font-size:15px; padding:10px 16px; border-radius:8px; border:none; cursor:pointer; background:var(--accent);
+    color:#fff; font-weight:600; font-family:inherit;}
+  button.secondary{background:#e5e7eb; color:var(--text);}
+  button.danger{background:var(--danger);}
+  button.small{padding:5px 10px; font-size:13px;}
+  button:disabled{opacity:.55; cursor:default;}
+  .row{display:flex; gap:8px; flex-wrap:wrap;}
+  .row > *{flex:1; min-width:0;}
+  .muted{color:var(--muted); font-size:13px;}
+  .num{font-variant-numeric:tabular-nums;}
+  .empty{color:var(--muted); text-align:center; padding:22px 0;}
+  .screen{display:none;} .screen.active{display:block;}
+  nav.tabs{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--border);
+    display:flex; z-index:10; padding-bottom:env(safe-area-inset-bottom,0px);}
+  nav.tabs button{flex:1; background:none; color:var(--muted); border-radius:0; padding:9px 2px; font-size:11px;
+    font-weight:500; display:flex; flex-direction:column; align-items:center; gap:2px;}
+  nav.tabs button.active{color:var(--accent); font-weight:700;}
+  nav.tabs svg{width:22px; height:22px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+  nav.tabs .badge{position:absolute; margin-left:16px; margin-top:-3px; background:var(--danger); color:#fff;
+    font-size:10px; min-width:16px; height:16px; border-radius:8px; line-height:16px; text-align:center; padding:0 4px;}
+  .chip{display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;}
+  .chip.ok{background:var(--ok-soft); color:var(--ok);} .chip.bad{background:var(--danger-soft); color:var(--danger);}
+  .chip.warn{background:var(--warn-soft); color:var(--warn);} .chip.neu{background:#eceef2; color:var(--muted);}
+  .drink-head{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;}
+  .ln{display:flex; justify-content:space-between; gap:12px; padding:3px 0; font-size:14px;}
+  .ln.sum{border-top:1px solid var(--border); margin-top:4px; padding-top:6px; font-weight:600;}
+  .ln.bad{color:var(--danger); font-weight:700;} .ln.good{color:var(--ok); font-weight:600;}
+  .ln .sub{color:var(--muted); font-size:12px;}
+  .grid{display:flex; flex-direction:column;}
+  .grid .it{display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--border);}
+  .grid .it:last-child{border-bottom:none;}
+  .grid .it span{flex:1; min-width:0;} .grid .it input{width:100px;}
+  .grp{font-size:12px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:14px 0 4px;}
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th,td{padding:7px 4px; text-align:right; border-bottom:1px solid var(--border);}
+  th:first-child,td:first-child{text-align:left;}
+  th{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-weight:600;}
+  .scroll{overflow-x:auto;}
+  .mv{display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--border); align-items:flex-start;}
+  .mv:first-child{border-top:none;}
+  .mv .l{min-width:0; overflow-wrap:anywhere;} .mv .r{text-align:right; white-space:nowrap;}
+  details.new > summary{list-style:none; cursor:pointer; background:var(--accent); color:#fff; font-weight:600;
+    padding:10px 16px; border-radius:8px; text-align:center;}
+  details.new > summary::-webkit-details-marker{display:none;}
+  details.new[open] > summary{background:#e5e7eb; color:var(--text); margin-bottom:6px;}
+  .center{min-height:70vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; gap:14px;}
+  .center p{color:var(--muted); max-width:340px;}
+  .spinner{width:36px; height:36px; border-radius:50%; border:4px solid var(--border); border-top-color:var(--accent); animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .toast{position:fixed; bottom:86px; left:50%; transform:translateX(-50%); background:#1c1e21; color:#fff; padding:10px 18px;
+    border-radius:8px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s; z-index:30; max-width:90%; text-align:center;}
+  .toast.show{opacity:1;}
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:40; display:flex; align-items:flex-end; justify-content:center;}
+  .overlay .box{background:#fff; width:100%; max-width:560px; border-radius:14px 14px 0 0; padding:16px; max-height:90vh; overflow:auto;}
+  @media (min-width:600px){ .overlay{align-items:center;} .overlay .box{border-radius:14px;} }
+  .demo{background:var(--warn-soft); color:var(--warn); text-align:center; font-size:12px; padding:4px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Sklad nápojov v2</h1>
+  <div class="right" id="hdr-right" style="display:none;"></div>
+</header>
+<div id="demo-bar" class="demo" style="display:none;">Ukážkový režim: dáta sú len v tomto prehliadači a nie sú skutočné.</div>
+
+<div id="auth-gate" class="center" style="display:none;">
+  <p>Táto aplikácia ukladá dáta do SharePointu vo vašom M365. Prihlás sa pracovným Microsoft účtom.</p>
+  <button onclick="prihlasit()">Prihlásiť sa cez Microsoft</button>
+  <p id="auth-error" style="color:var(--danger);"></p>
+</div>
+<div id="app-loading" class="center" style="display:none;">
+  <div class="spinner"></div><p id="loading-text">Načítavam dáta zo SharePointu...</p>
+</div>
+
+<div id="app-root" style="display:none;">
+<main>
+  <section id="screen-cesta" class="screen active"></section>
+  <section id="screen-sklad" class="screen"></section>
+  <section id="screen-pohyby" class="screen"></section>
+  <section id="screen-inventura" class="screen"></section>
+  <section id="screen-kontrola" class="screen"></section>
+  <section id="screen-nastavenia" class="screen"></section>
+</main>
+<nav class="tabs">
+  <button data-s="cesta" onclick="go('cesta')"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 17c6 0 2-10 8-10"/></svg>Cesta</button>
+  <button data-s="sklad" onclick="go('sklad')"><svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v9l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v9"/></svg>Sklad</button>
+  <button data-s="pohyby" onclick="go('pohyby')"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Pohyby</button>
+  <button data-s="inventura" onclick="go('inventura')"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg>Inventúra</button>
+  <button data-s="kontrola" onclick="go('kontrola')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5M12 16v.5"/></svg>Kontrola<span class="badge" id="badge" style="display:none;"></span></button>
+</nav>
+</div>
+<div class="toast" id="toast"></div>
+<div id="modal"></div>
+
+<script>
+/* Sklad nápojov v2, fáza 1.
+   Model: kniha pohybov + inventúry. Obdobie medzi inventúrami A a B = A.dátum <= pohyb < B.dátum
+   (dňom inventúry sa začína nové obdobie). Očakávaný stav = stav pri A + príjmy + vrátenia - predaj - rozdané - straty.
+   Rozdiel = napočítané pri B - očakávaný stav. Nezrovnalosť sa vysvetľuje v Kontrole, nič sa nemaže (soft delete).
+   Dáta: Sklad-app/sklad-data-v2.json na SharePointe (alebo ?demo=1: localStorage s vymyslenými dátami). */
+
+const APP_VERSION = "v2.1-fáza2";
+const DEMO = new URLSearchParams(location.search).has("demo");
+const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
+  authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
+  redirectUri: location.origin + location.pathname }, cache:{ cacheLocation:"localStorage" } };
+const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
+const SITE_HOST = "translata.sharepoint.com", SITE_PATH = "/sites/liquidpositive";
+const FILE_V2 = "Sklad-app/sklad-data-v2.json", FILE_V1 = "Sklad-app/sklad-data.json", FILE_SHOP = "Sklad-app/shoptet-vydaj.json";
+const LP_NAMES = ["Orange","Marakuja","Granat","Pure","Cannabis","Cherry","Outlast"];
+const G1 = "Plechovky Liquid Positive", G2 = "Krab a pivá";
+/* kódy produktov v Shoptete (PPP) podľa názvu nápoja v appke; dopĺňajú sa tlačidlom v Nastaveniach */
+const KNOWN_CODES = { "Orange":["320"], "Marakuja":["319"], "Granat":["318"], "Granát":["318"], "Pure":["316"], "Cannabis":["317"],
+  "Cherry":["454"], "Outlast":["459"], "Krab 0,5 plech":["362"], "Jedenastka 1L plast":["98"], "Vandal 14°1L plast":["99"],
+  "Cervena veza 12°1L plast":["100"], "APAc 13°1L plast":["198"], "Jedenastka 0,75 sklo":["68"], "Vandal 14°0,75 sklo":["74"],
+  "Cervena veza 12°0,75 sklo":["65"], "APAc 13°0,75 sklo":["62"] };
+
+const TYPES = {
+  prijem:  { label:"Naskladnenie", sign: 1 },
+  vratenie:{ label:"Vrátenie",     sign: 1 },
+  predaj:  { label:"Predaj",       sign:-1 },
+  rozdane: { label:"Rozdané",      sign:-1 },
+  strata:  { label:"Strata / poškodenie", sign:-1 }
+};
+
+let S = { data:null, etag:null, shop:{ lines:[], meta:null }, shopEtag:null, user:"", screen:"cesta", period:null };
+
+/* ---------- pomocné ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const nf = new Intl.NumberFormat("sk-SK");
+const fmtN = n => nf.format(n);
+const MINUS = "−";
+const sgn = n => n > 0 ? "+" + fmtN(n) : n < 0 ? MINUS + fmtN(-n) : "0";
+const fmtD = iso => { const [y,m,d] = iso.split("-"); return `${+d}. ${+m}. ${y}`; };
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
+const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const isGSO = c => /^gso$|good stuff only/i.test((c || "").trim());
+function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2800); }
+const emptyData = () => ({ version:2, drinks:[], movements:[], inventories:[], resolutions:[], settings:{ gsoIco:"" }, customers:{} });
+function normalize(d){ d.settings = d.settings || { gsoIco:"" }; d.customers = d.customers || {}; d.resolutions = d.resolutions || [];
+  d.drinks.forEach(x => { x.codes = x.codes || []; }); return d; }
+
+/* ---------- výpočty (čisté funkcie nad S.data) ---------- */
+const invs = () => [...S.data.inventories].sort((a,b) => a.date.localeCompare(b.date));
+/* Riadky z Shoptetu (PPP) sa správajú ako pohyby typu „predaj“; kód produktu sa mapuje na nápoj podľa Nastavení. */
+function shopMoves(){
+  const byCode = {}; S.data.drinks.forEach(d => (d.codes || []).forEach(c => { byCode[c] = d.id; }));
+  const gso = (S.data.settings.gsoIco || "").trim(), names = S.data.customers, out = [];
+  for (const l of S.shop.lines){ const drinkId = byCode[l.c]; if (!drinkId) continue;
+    out.push({ id:"s:" + l.o + "|" + l.c, date:l.d, drinkId, qty:l.q, type:"predaj", source:"shoptet", ref:l.o, ico:l.i,
+      customer: (gso && l.i === gso) ? "GSO" : (names[l.i] || (l.i ? "IČO " + l.i : "E-shop B2C (Shoptet)")) }); }
+  return out;
+}
+const liveMoves = () => S.data.movements.filter(m => !m.deleted).concat(shopMoves());
+const visibleDrinks = () => S.data.drinks.filter(d => !d.hidden);
+
+function periodCalc(A, B, drink){
+  const ms = liveMoves().filter(m => m.drinkId === drink.id && m.date >= A.date && (!B || m.date < B.date));
+  const sum = f => ms.filter(f).reduce((s,m) => s + m.qty, 0);
+  const customers = {};
+  ms.filter(m => m.type === "predaj" && !isGSO(m.customer)).forEach(m => {
+    const k = (m.customer || "bez odberateľa").trim(); customers[k] = (customers[k] || 0) + m.qty; });
+  const open = A.counts[drink.id] ?? null;
+  const r = { open, prijem:sum(m => m.type==="prijem"), vratenie:sum(m => m.type==="vratenie"),
+    gso:sum(m => m.type==="predaj" && isGSO(m.customer)), other:sum(m => m.type==="predaj" && !isGSO(m.customer)),
+    rozdane:sum(m => m.type==="rozdane"), strata:sum(m => m.type==="strata"), customers, moves:ms.length };
+  r.expected = open == null ? null : open + r.prijem + r.vratenie - r.gso - r.other - r.rozdane - r.strata;
+  r.counted = B ? (B.counts[drink.id] ?? null) : null;
+  r.diff = (r.expected != null && r.counted != null) ? r.counted - r.expected : null;
+  return r;
+}
+const resFor = (invId, drinkId) => S.data.resolutions.find(r => r.invId === invId && r.drinkId === drinkId);
+
+function openDiscrepancies(){
+  const I = invs(), out = [];
+  for (let i = 1; i < I.length; i++) for (const d of S.data.drinks){
+    const c = periodCalc(I[i-1], I[i], d);
+    if (c.diff && c.diff !== 0 && !resFor(I[i].id, d.id)) out.push({ A:I[i-1], B:I[i], drink:d, c });
+  }
+  return out;
+}
+
+/* ---------- úložisko ---------- */
+let msalInstance = null, account = null, SITE_ID = null;
+async function initMsal(){
+  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  await msalInstance.initialize();
+  const res = await msalInstance.handleRedirectPromise();
+  if (res && res.account) { account = res.account; return; }
+  const a = msalInstance.getAllAccounts(); if (a.length) { account = a[0]; return; }
+  try { account = (await msalInstance.ssoSilent({ scopes:GRAPH_SCOPES })).account; } catch(e){}
+}
+function prihlasit(){ $("auth-error").textContent = ""; msalInstance.loginRedirect({ scopes:GRAPH_SCOPES }); }
+function odhlasit(){ msalInstance.logoutRedirect(); }
+async function token(){
+  try { return (await msalInstance.acquireTokenSilent({ scopes:GRAPH_SCOPES, account })).accessToken; }
+  catch(e){ await msalInstance.acquireTokenRedirect({ scopes:GRAPH_SCOPES }); return null; }
+}
+async function gfetch(url, opt = {}){
+  const t = await token();
+  return fetch(url, { ...opt, headers:{ Authorization:`Bearer ${t}`, ...(opt.headers || {}) } });
+}
+async function siteId(){
+  if (SITE_ID) return SITE_ID;
+  const r = await gfetch(`https://graph.microsoft.com/v1.0/sites/${SITE_HOST}:${SITE_PATH}`);
+  if (!r.ok) throw new Error(`Site (${r.status})`);
+  SITE_ID = (await r.json()).id; return SITE_ID;
+}
+const itemUrl = p => `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${p}`;
+
+const GraphStore = {
+  async load(file, etagKey){
+    await siteId();
+    const meta = await gfetch(itemUrl(file));
+    if (meta.status === 404) { S[etagKey] = null; return null; }
+    if (!meta.ok) throw new Error(`Načítanie (${meta.status})`);
+    S[etagKey] = (await meta.json()).eTag;
+    const c = await gfetch(itemUrl(file) + ":/content");
+    if (!c.ok) throw new Error(`Obsah (${c.status})`);
+    return await c.json();
+  },
+  async save(file, etagKey, data){
+    const headers = { "Content-Type":"application/json" };
+    if (S[etagKey]) headers["If-Match"] = S[etagKey];
+    const r = await gfetch(itemUrl(file) + ":/content", { method:"PUT", headers, body:JSON.stringify(data) });
+    if (r.status === 412) throw new Error("CONFLICT");
+    if (!r.ok) throw new Error(`Zápis (${r.status})`);
+    S[etagKey] = (await r.json()).eTag;
+  },
+  async loadV1(){
+    await siteId();
+    const c = await gfetch(itemUrl(FILE_V1) + ":/content");
+    if (!c.ok) throw new Error(`v1 súbor (${c.status})`);
+    return await c.json();
+  }
+};
+const DemoStore = {
+  async load(file){ const r = (window.__mem || {})[file] ?? localStorage.getItem("sklad_v2_demo:" + file); return r ? JSON.parse(r) : null; },
+  async save(file, etagKey, data){ try { localStorage.setItem("sklad_v2_demo:" + file, JSON.stringify(data)); } catch(e){ (window.__mem = window.__mem || {})[file] = JSON.stringify(data); } },
+  async loadV1(){ throw new Error("V ukážkovom režime nie je v1 súbor."); }
+};
+const Store = DEMO ? DemoStore : GraphStore;
+
+async function loadAll(){
+  S.data = normalize((await Store.load(FILE_V2, "etag")) || (DEMO ? seedDemo() : emptyData()));
+  S.shop = (await Store.load(FILE_SHOP, "shopEtag")) || { lines:[], meta:null };
+}
+async function reload(){ await loadAll(); renderAll(); }
+async function mutate(fn, okMsg){
+  const snap = JSON.stringify(S.data);
+  try { fn(); await Store.save(FILE_V2, "etag", S.data); if (okMsg) toast(okMsg); renderAll(); return true; }
+  catch(e){
+    S.data = JSON.parse(snap);
+    if (e.message === "CONFLICT") { toast("Dáta medzitým zmenil niekto iný. Načítavam znova, zápis zopakuj."); await reload(); }
+    else { toast("Chyba: " + e.message); renderAll(); }
+    return false;
+  }
+}
+async function mutateShop(fn, okMsg){
+  const snap = JSON.stringify(S.shop);
+  try { fn(); await Store.save(FILE_SHOP, "shopEtag", S.shop); if (okMsg) toast(okMsg); renderAll(); return true; }
+  catch(e){
+    S.shop = JSON.parse(snap);
+    if (e.message === "CONFLICT") { toast("Dáta medzitým zmenil niekto iný. Načítavam znova, zápis zopakuj."); await reload(); }
+    else { toast("Chyba: " + e.message); renderAll(); }
+    return false;
+  }
+}
+
+/* ---------- navigácia ---------- */
+function go(s){
+  S.screen = s;
+  document.querySelectorAll(".screen").forEach(e => e.classList.toggle("active", e.id === "screen-" + s));
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.s === s));
+  window.scrollTo(0, 0); renderAll();
+}
+function renderAll(){
+  if (!S.data) return;
+  renderHeader();
+  ({ cesta:renderCesta, sklad:renderSklad, pohyby:renderPohyby, inventura:renderInventura,
+     kontrola:renderKontrola, nastavenia:renderNastavenia }[S.screen])();
+  const n = openDiscrepancies().length, b = $("badge");
+  b.style.display = n ? "inline-block" : "none"; b.textContent = n;
+}
+function renderHeader(){
+  $("hdr-right").style.display = "flex";
+  $("hdr-right").innerHTML = `<button onclick="go('nastavenia')">Nastavenia</button>` +
+    (DEMO ? "" : `<button onclick="odhlasit()">Odhlásiť</button>`);
+}
+
+/* ---------- CESTA ---------- */
+function periodOptions(){
+  const I = invs(), o = [];
+  if (I.length) o.push({ key:"open", A:I[I.length-1], B:null, label:`od ${fmtD(I[I.length-1].date)} (prebieha)` });
+  for (let i = I.length - 1; i >= 1; i--) o.push({ key:"p" + i, A:I[i-1], B:I[i], label:`${fmtD(I[i-1].date)} až ${fmtD(I[i].date)}` });
+  return o;
+}
+function renderCesta(){
+  const el = $("screen-cesta"), opts = periodOptions();
+  if (!opts.length){
+    el.innerHTML = `<div class="card"><h2>Cesta plechoviek</h2><div class="empty">Zatiaľ nie je žiadna inventúra.<br>
+      Začnite inventúrou, ktorá je otváracím stavom.<br><br><button onclick="go('inventura')">Urobiť inventúru</button></div></div>`;
+    return;
+  }
+  if (!S.period || !opts.find(o => o.key === S.period)) S.period = opts.length > 1 ? opts[1].key : opts[0].key;
+  const cur = opts.find(o => o.key === S.period), { A, B } = cur;
+  const rows = S.data.drinks.map(d => ({ d, c:periodCalc(A, B, d) }))
+    .filter(x => !x.d.hidden || x.c.open != null || x.c.moves || x.c.counted != null);
+  const bad = rows.filter(x => x.c.diff && !resFor(B?.id, x.d.id)).length;
+  let html = `<div class="card"><h2>Cesta plechoviek</h2>
+    <select id="period" onchange="S.period=this.value;renderCesta()">${opts.map(o => `<option value="${o.key}" ${o.key===S.period?"selected":""}>${o.label}</option>`).join("")}</select>
+    <p class="muted" style="margin-top:8px;">${B
+      ? `Obdobie: pohyby od ${fmtD(A.date)} (vrátane) do ${fmtD(B.date)} (bez tohto dňa). Nezrovnalostí: <b>${bad}</b>.`
+      : `Prebiehajúce obdobie od ${fmtD(A.date)}. Je to odhad: zahŕňa len zapísané pohyby, predaj, ktorý ešte nie je zapísaný, sa doplní neskôr.`}</p></div>`;
+  const groups = [...new Set(rows.map(x => x.d.group || ""))];
+  for (const g of groups){
+    html += `<div class="grp">${esc(g || "Ostatné")}</div>`;
+    for (const { d, c } of rows.filter(x => (x.d.group || "") === g)) html += drinkCard(d, c, A, B);
+  }
+  const cust = {}; let gsoTot = 0;
+  rows.forEach(x => { gsoTot += x.c.gso; Object.entries(x.c.customers).forEach(([k,v]) => { cust[k] = (cust[k] || 0) + v; }); });
+  const cl = Object.entries(cust).sort((a,b) => b[1] - a[1]);
+  if (gsoTot || cl.length) html += `<div class="card"><h2>Kam plechovky odišli (predaj)</h2><table><thead><tr><th>Odberateľ</th><th>ks</th></tr></thead><tbody>
+    ${gsoTot ? `<tr><td>GSO (doklad)</td><td class="num"><b>${fmtN(gsoTot)}</b></td></tr>` : ""}
+    ${cl.map(([k,v]) => `<tr><td>${esc(k)}</td><td class="num">${fmtN(v)}</td></tr>`).join("")}</tbody></table></div>`;
+  el.innerHTML = html;
+}
+function ln(label, val, cls = "", sub = ""){
+  return `<div class="ln ${cls}"><span>${label}${sub ? `<div class="sub">${sub}</div>` : ""}</span><span class="num">${val}</span></div>`;
+}
+function drinkCard(d, c, A, B){
+  const res = B ? resFor(B.id, d.id) : null;
+  let chip;
+  if (c.open == null) chip = `<span class="chip neu">bez otváracieho stavu</span>`;
+  else if (!B) chip = `<span class="chip neu">odhad</span>`;
+  else if (c.counted == null) chip = `<span class="chip neu">nenapočítané</span>`;
+  else if (c.diff === 0) chip = `<span class="chip ok">OK</span>`;
+  else if (res) chip = `<span class="chip warn">Vysvetlená</span>`;
+  else chip = `<span class="chip bad">Nezrovnalosť ${sgn(c.diff)}</span>`;
+  const cust = Object.entries(c.customers).sort((a,b) => b[1] - a[1]).map(([k,v]) => `${esc(k)} ${fmtN(v)}`).join(", ");
+  let h = `<div class="card"><div class="drink-head"><h3>${esc(d.name)}</h3>${chip}</div>`;
+  h += ln("Otvárací stav", c.open == null ? "–" : fmtN(c.open));
+  h += ln("+ Naskladnené", fmtN(c.prijem));
+  if (c.vratenie) h += ln("+ Vrátenia", fmtN(c.vratenie));
+  if (c.gso) h += ln(MINUS + " Predaj GSO", fmtN(c.gso));
+  if (c.other) h += ln(MINUS + " Predaj ostatným", fmtN(c.other), "", cust);
+  if (c.rozdane) h += ln(MINUS + " Rozdané", fmtN(c.rozdane));
+  if (c.strata) h += ln(MINUS + " Straty", fmtN(c.strata));
+  h += ln(B ? "= Očakávaný stav" : "= Odhad stavu teraz", c.expected == null ? "–" : fmtN(c.expected), "sum");
+  if (B){
+    h += ln("Napočítané", c.counted == null ? "–" : fmtN(c.counted));
+    if (c.diff != null) h += ln("Rozdiel", sgn(c.diff), c.diff === 0 ? "good" : (res ? "" : "bad"));
+    if (c.diff && !res) h += `<div style="margin-top:8px;"><button class="small" onclick="openExplain('${B.id}','${d.id}')">Vysvetliť</button></div>`;
+    if (res) h += `<p class="muted" style="margin:8px 0 0;">${esc(resLabel(res))}${res.note ? ": " + esc(res.note) : ""}</p>`;
+  }
+  return h + `</div>`;
+}
+
+/* ---------- SKLAD ---------- */
+function renderSklad(){
+  const el = $("screen-sklad"), I = invs();
+  if (!I.length){ el.innerHTML = `<div class="card"><h2>Stav skladu</h2><div class="empty">Zatiaľ nie je žiadna inventúra.</div></div>`; return; }
+  const L = I[I.length-1], open = new Set(openDiscrepancies().map(x => x.drink.id));
+  const rows = S.data.drinks.map(d => ({ d, c:periodCalc(L, null, d) })).filter(x => !x.d.hidden || x.c.open != null);
+  let h = `<div class="card"><h2>Stav skladu</h2>
+    <p class="muted">Posledná inventúra ${fmtD(L.date)}. „Odhad teraz“ = napočítané + zapísané pohyby od toho dňa.</p>`;
+  for (const g of [...new Set(rows.map(x => x.d.group || ""))]){
+    h += `<div class="grp">${esc(g || "Ostatné")}</div><div class="scroll"><table><thead><tr><th>Nápoj</th><th>Napočítané</th><th>Pohyby</th><th>Odhad teraz</th><th></th></tr></thead><tbody>`;
+    for (const { d, c } of rows.filter(x => (x.d.group || "") === g)){
+      const net = c.open == null ? null : c.expected - c.open;
+      h += `<tr><td>${esc(d.name)}</td><td class="num">${c.open == null ? "–" : fmtN(c.open)}</td>
+        <td class="num">${net == null ? "–" : sgn(net)}</td><td class="num"><b>${c.expected == null ? "–" : fmtN(c.expected)}</b></td>
+        <td>${open.has(d.id) ? `<span class="chip bad">Nezrovnalosť</span>` : ""}</td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+  }
+  el.innerHTML = h + `</div>`;
+}
+
+/* ---------- POHYBY ---------- */
+function gridInputs(prefix){
+  const ds = visibleDrinks(); let h = "";
+  for (const g of [...new Set(ds.map(d => d.group || ""))]){
+    h += `<div class="grp">${esc(g || "Ostatné")}</div><div class="grid">` +
+      ds.filter(d => (d.group || "") === g).map(d =>
+        `<div class="it"><span>${esc(d.name)}</span><input type="number" inputmode="numeric" min="0" id="${prefix}-${d.id}" placeholder="ks"></div>`).join("") + `</div>`;
+  }
+  return h;
+}
+const mvFilter = { drink:"", type:"" };
+function renderPohyby(){
+  const el = $("screen-pohyby");
+  const keep = document.getElementById("mv-form-open")?.open;
+  const list = liveMoves().filter(m => (!mvFilter.drink || m.drinkId === mvFilter.drink) && (!mvFilter.type || m.type === mvFilter.type))
+    .sort((a,b) => b.date.localeCompare(a.date) || (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 150);
+  const nameOf = id => S.data.drinks.find(d => d.id === id)?.name || "?";
+  const meta = S.shop.meta, haveCodes = S.data.drinks.some(d => (d.codes || []).length), gso = S.data.settings.gsoIco;
+  el.innerHTML = `<div class="card"><h2>Import zo Shoptetu (PPP)</h2>
+    <p class="muted">Nahraj CSV export objednávok (stav Odoslaná, riadok na položku). Predaj sa prepíše do pohybov, ručné záznamy sa nemenia.
+    Ak ste ten istý predaj zapisovali ručne, zmažte ho, inak sa započíta dvakrát.</p>
+    ${!gso ? `<p class="muted" style="color:var(--danger);">Nastav IČO GSO v Nastaveniach, inak sa predaj GSO nerozlíši od ostatných firiem.</p>` : ""}
+    ${!haveCodes ? `<p class="muted" style="color:var(--danger);">Nápoje nemajú kódy Shoptetu. V Nastaveniach ich doplň (tlačidlo „Doplniť známe kódy“).</p>` : ""}
+    <input type="file" id="shop-file" accept=".csv,text/csv,text/plain" onchange="onShopFile(this)">
+    ${meta ? `<p class="muted" style="margin-top:8px;">Posledný import ${fmtD(meta.at.slice(0,10))} (${esc(meta.by || "")}): ${meta.orders} objednávok, ${fmtD(meta.from)} až ${fmtD(meta.to)}, ${meta.lines} riadkov (nových ${meta.added}, odstránených ${meta.removed}).</p>
+      ${meta.unmapped && meta.unmapped.length ? `<p class="muted"><b>Nesledované položky</b> (nemajú kód v Nastaveniach): ${meta.unmapped.map(u => esc(u.name) + " (" + esc(u.code) + ") " + fmtN(u.qty)).join(", ")}</p>` : ""}` : ""}
+    </div>
+    <div class="card"><h2>Pohyby</h2>
+    <details class="new" id="mv-form-open" ${keep ? "open" : ""}><summary>Nový pohyb</summary>
+      <label for="mv-type">Druh pohybu</label>
+      <select id="mv-type" onchange="mvTypeChanged()">${Object.entries(TYPES).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join("")}</select>
+      <label for="mv-date">Dátum</label><input type="date" id="mv-date" value="${todayISO()}">
+      <div id="mv-cust-wrap"><label for="mv-cust" id="mv-cust-l">Odberateľ (GSO alebo firma)</label><input type="text" id="mv-cust" list="cust-list" placeholder="napr. GSO">
+        <datalist id="cust-list">${[...new Set(liveMoves().filter(m => m.type === "predaj" && m.customer).map(m => m.customer))].map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
+      <label for="mv-note">Poznámka</label><input type="text" id="mv-note" placeholder="voliteľné (číslo várky, objednávky…)">
+      ${gridInputs("mv")}
+      <div class="row" style="margin-top:14px;"><button onclick="saveMovements()">Uložiť pohyb</button></div>
+    </details></div>
+    <div class="card"><h2>Zoznam</h2>
+      <div class="row"><select id="f-drink" onchange="mvFilter.drink=this.value;renderPohyby()"><option value="">Všetky nápoje</option>${S.data.drinks.map(d => `<option value="${d.id}" ${mvFilter.drink===d.id?"selected":""}>${esc(d.name)}</option>`).join("")}</select>
+      <select id="f-type" onchange="mvFilter.type=this.value;renderPohyby()"><option value="">Všetky druhy</option>${Object.entries(TYPES).map(([k,v]) => `<option value="${k}" ${mvFilter.type===k?"selected":""}>${v.label}</option>`).join("")}</select></div>
+      <div style="margin-top:8px;">${list.length ? list.map(m => `<div class="mv"><div class="l"><b>${esc(nameOf(m.drinkId))}</b>
+        <div class="muted">${fmtD(m.date)} · ${TYPES[m.type]?.label || m.type}${m.customer ? " · " + esc(m.customer) : ""}${m.note ? " · " + esc(m.note) : ""}</div></div>
+        <div class="r"><div class="num"><b>${TYPES[m.type].sign > 0 ? "+" : MINUS}${fmtN(m.qty)}</b></div>
+        ${m.source === "shoptet" ? `<span class="chip neu">Shoptet · obj. ${esc(m.ref)}</span>` : `<button class="secondary small" onclick="delMovement('${m.id}')">Zmazať</button>`}</div></div>`).join("") : `<div class="empty">Žiadne pohyby.</div>`}</div></div>`;
+  mvTypeChanged();
+}
+function mvTypeChanged(){
+  const t = $("mv-type")?.value; if (!t) return;
+  const w = $("mv-cust-wrap"), l = $("mv-cust-l");
+  w.style.display = (t === "predaj" || t === "rozdane" || t === "strata") ? "block" : "none";
+  l.textContent = t === "predaj" ? "Odberateľ (GSO alebo firma)" : t === "rozdane" ? "Komu / na čo (povinné)" : "Dôvod (povinné)";
+}
+async function saveMovements(){
+  const type = $("mv-type").value, date = $("mv-date").value, cust = ($("mv-cust")?.value || "").trim(), note = $("mv-note").value.trim();
+  if (!date) return toast("Vyber dátum");
+  if (type === "predaj" && !cust) return toast("Zadaj odberateľa (GSO alebo firma)");
+  if ((type === "rozdane" || type === "strata") && !(cust || note)) return toast("Zadaj dôvod alebo poznámku");
+  const items = visibleDrinks().map(d => ({ d, q:parseFloat($("mv-" + d.id).value) })).filter(x => x.q > 0);
+  if (!items.length) return toast("Zadaj množstvo aspoň pri jednom nápoji");
+  const ok = await mutate(() => items.forEach(x => S.data.movements.push({ id:uid(), date, drinkId:x.d.id, qty:x.q, type,
+    customer:cust || undefined, note:note || undefined, source:"manual", by:S.user, at:new Date().toISOString() })),
+    `Uložené (${items.length} ${items.length === 1 ? "nápoj" : "nápoje"})`);
+  if (ok) document.getElementById("mv-form-open").open = false;
+}
+async function delMovement(id){
+  const m = S.data.movements.find(x => x.id === id); if (!m) return;
+  const linked = S.data.resolutions.filter(r => r.movementId === id);
+  if (!confirm("Zmazať tento pohyb?" + (linked.length ? " Znovu sa otvorí nezrovnalosť, ktorú vysvetľoval." : ""))) return;
+  await mutate(() => { m.deleted = { by:S.user, at:new Date().toISOString() };
+    S.data.resolutions = S.data.resolutions.filter(r => r.movementId !== id); }, "Pohyb zmazaný");
+}
+
+/* ---------- INVENTÚRA ---------- */
+function renderInventura(){
+  const el = $("screen-inventura"), I = invs();
+  el.innerHTML = `<div class="card"><h2>Urobiť inventúru</h2>
+    <p class="muted">Zapíš fyzicky napočítaný stav. Dňom inventúry sa začína nové obdobie.</p>
+    <label for="inv-date">Dátum inventúry</label><input type="date" id="inv-date" value="${todayISO()}">
+    ${gridInputs("inv")}
+    <div class="row" style="margin-top:14px;"><button onclick="saveInventory()">Uložiť inventúru</button></div></div>
+    <div class="card"><h2>Doterajšie inventúry</h2>${I.length ? [...I].reverse().map(i => `<div class="mv"><div class="l"><b>${fmtD(i.date)}</b>
+      <div class="muted">${Object.keys(i.counts).length} nápojov</div></div>
+      <div class="r"><button class="secondary small" onclick="showInv('${i.id}')">V Ceste</button></div></div>`).join("") : `<div class="empty">Zatiaľ žiadne.</div>`}</div>`;
+}
+function showInv(id){ S.period = "p" + invs().findIndex(i => i.id === id); if (S.period === "p0") S.period = "open"; go("cesta"); }
+async function saveInventory(){
+  const date = $("inv-date").value; if (!date) return toast("Vyber dátum");
+  const counts = {}; let missing = 0;
+  for (const d of visibleDrinks()){ const v = $("inv-" + d.id).value; if (v === "") missing++; else counts[d.id] = parseFloat(v); }
+  if (!Object.keys(counts).length) return toast("Vyplň aspoň jeden nápoj");
+  if (missing && !confirm(`${missing} nápojov nemá napočítaný stav. Uložiť aj tak?`)) return;
+  const exist = S.data.inventories.find(i => i.date === date);
+  if (exist && !confirm("Pre tento dátum už inventúra existuje. Prepísať? Súvisiace vysvetlenia sa zrušia.")) return;
+  const before = openDiscrepancies().length;
+  const ok = await mutate(() => {
+    if (exist){ S.data.inventories = S.data.inventories.filter(i => i.id !== exist.id);
+      S.data.resolutions = S.data.resolutions.filter(r => r.invId !== exist.id); }
+    S.data.inventories.push({ id:uid(), date, counts, by:S.user, at:new Date().toISOString() });
+  });
+  if (!ok) return;
+  const n = openDiscrepancies().length;
+  S.period = null; const o = periodOptions(); S.period = o.length > 1 ? o[1].key : o[0].key;
+  toast(n ? `Inventúra uložená. Nezrovnalostí na vysvetlenie: ${n}` : "Inventúra uložená. Všetko sedí.");
+  go(n ? "kontrola" : "cesta");
+}
+
+/* ---------- KONTROLA ---------- */
+function resLabel(r){ return ({ chyba_prijem:"Chýbajúce naskladnenie", strata:"Strata / poškodenie", rozdane:"Rozdané",
+  chyba_pocet:"Chyba počítania", iny:"Iný dôvod" })[r.reason] || r.reason; }
+function renderKontrola(){
+  const el = $("screen-kontrola"), op = openDiscrepancies();
+  const nm = id => S.data.drinks.find(d => d.id === id)?.name || "?";
+  let h = `<div class="card"><h2>Otvorené nezrovnalosti (${op.length})</h2>`;
+  const groups = {}; op.forEach(x => { (groups[x.B.id] = groups[x.B.id] || { A:x.A, B:x.B, items:[] }).items.push(x); });
+  const order = Object.values(groups).sort((a,b) => b.B.date.localeCompare(a.B.date));
+  h += order.length ? order.map(g => { const pos = g.items.filter(x => x.c.diff > 0);
+    return `<div class="grp" style="margin-top:12px;">${fmtD(g.A.date)} až ${fmtD(g.B.date)} (${g.items.length})</div>
+      ${pos.length ? `<div style="margin-bottom:4px;"><button class="secondary small" onclick="openBulk('${g.B.id}')">Vysvetliť všetky kladné rozdiely naraz (${pos.length})</button></div>` : ""}` +
+    g.items.map(x => `<div class="mv"><div class="l"><b>${esc(x.drink.name)}</b>
+      <div class="muted">očakávané ${fmtN(x.c.expected)}, napočítané ${fmtN(x.c.counted)}</div></div>
+      <div class="r"><div class="num"><span class="chip bad">${sgn(x.c.diff)}</span></div>
+      <button class="small" onclick="openExplain('${x.B.id}','${x.drink.id}')">Vysvetliť</button></div></div>`).join(""); }).join("")
+    : `<div class="empty">Žiadne otvorené nezrovnalosti.</div>`;
+  h += `</div><div class="card"><h2>Vysvetlené</h2>`;
+  const rs = [...S.data.resolutions].sort((a,b) => (b.at || "").localeCompare(a.at || ""));
+  h += rs.length ? rs.map(r => { const inv = S.data.inventories.find(i => i.id === r.invId);
+    return `<div class="mv"><div class="l"><b>${esc(nm(r.drinkId))}</b> <span class="muted">k ${inv ? fmtD(inv.date) : "?"}</span>
+      <div class="muted">${esc(resLabel(r))}${r.note ? ": " + esc(r.note) : ""} · ${esc(r.by || "")} ${r.at ? fmtD(r.at.slice(0,10)) : ""}</div></div>
+      <div class="r num"><span class="chip warn">${sgn(r.diff)}</span></div></div>`; }).join("") : `<div class="empty">Zatiaľ nič.</div>`;
+  el.innerHTML = h + `</div>`;
+}
+function openExplain(invId, drinkId){
+  const I = invs(), i = I.findIndex(x => x.id === invId), A = I[i-1], B = I[i], d = S.data.drinks.find(x => x.id === drinkId);
+  const c = periodCalc(A, B, d), pos = c.diff > 0;
+  const opts = pos ? [["chyba_prijem","Chýbajúce naskladnenie (doplní sa príjem)"],["chyba_pocet","Chyba počítania (ponechať rozdiel)"],["iny","Iný dôvod"]]
+                   : [["strata","Strata / poškodenie (doplní sa strata)"],["rozdane","Rozdané (doplní sa výdaj)"],["chyba_pocet","Chyba počítania (ponechať rozdiel)"],["iny","Iný dôvod"]];
+  $("modal").innerHTML = `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="box">
+    <h3>${esc(d.name)}: rozdiel ${sgn(c.diff)}</h3>
+    <p class="muted">Obdobie ${fmtD(A.date)} až ${fmtD(B.date)}. Očakávané ${fmtN(c.expected)}, napočítané ${fmtN(c.counted)}.</p>
+    <label for="ex-reason">Dôvod</label><select id="ex-reason" onchange="exChanged()">${opts.map(o => `<option value="${o[0]}">${o[1]}</option>`).join("")}</select>
+    <div id="ex-date-wrap"><label for="ex-date">Dátum doplneného pohybu</label><input type="date" id="ex-date" value="${addDays(B.date, -1)}" min="${A.date}" max="${addDays(B.date, -1)}"></div>
+    <label for="ex-note" id="ex-note-l">Poznámka</label><textarea id="ex-note" placeholder="napr. išlo priamo z výroby ku klientovi"></textarea>
+    <div class="row" style="margin-top:12px;"><button class="secondary" onclick="closeModal()">Zrušiť</button>
+    <button onclick="doExplain('${invId}','${drinkId}')">Uložiť vysvetlenie</button></div></div></div>`;
+  exChanged();
+}
+function exChanged(){
+  const r = $("ex-reason").value, mv = ["chyba_prijem","strata","rozdane"].includes(r);
+  $("ex-date-wrap").style.display = mv ? "block" : "none";
+  $("ex-note-l").textContent = (mv || r === "iny") ? "Poznámka (povinná)" : "Poznámka";
+}
+function closeModal(){ $("modal").innerHTML = ""; }
+async function doExplain(invId, drinkId){
+  const I = invs(), i = I.findIndex(x => x.id === invId), A = I[i-1], B = I[i], d = S.data.drinks.find(x => x.id === drinkId);
+  const c = periodCalc(A, B, d), reason = $("ex-reason").value, note = $("ex-note").value.trim(), date = $("ex-date").value;
+  const mv = ["chyba_prijem","strata","rozdane"].includes(reason);
+  if ((mv || reason === "iny") && !note) return toast("Doplň poznámku");
+  if (mv && (!date || date < A.date || date >= B.date)) return toast("Dátum musí patriť do obdobia");
+  const now = new Date().toISOString(); let movementId;
+  const ok = await mutate(() => {
+    if (mv){ movementId = uid();
+      S.data.movements.push({ id:movementId, date, drinkId, qty:Math.abs(c.diff), type:reason === "chyba_prijem" ? "prijem" : reason,
+        note:"Doplnené pri vysvetlení nezrovnalosti: " + note, source:"vysvetlenie", by:S.user, at:now }); }
+    S.data.resolutions.push({ id:uid(), invId, drinkId, reason, note, diff:c.diff, expected:c.expected, counted:c.counted, movementId, by:S.user, at:now });
+  }, "Vysvetlenie uložené");
+  if (ok) closeModal();
+}
+
+/* ---------- NASTAVENIA ---------- */
+function renderNastavenia(){
+  const el = $("screen-nastavenia"), ds = S.data.drinks;
+  const byIco = {}, codeSet = new Set(ds.flatMap(d => d.codes || [])), gsoI = (S.data.settings.gsoIco || "").trim();
+  S.shop.lines.forEach(l => { if (l.i && l.i !== gsoI && codeSet.has(l.c)) byIco[l.i] = (byIco[l.i] || 0) + l.q; });
+  el.innerHTML = `<div class="card"><h2>Shoptet (PPP)</h2>
+    <label for="gso-ico">IČO spoločnosti GSO (jej objednávky sú doklad za predaj GSO)</label>
+    <input type="text" id="gso-ico" inputmode="numeric" value="${esc(S.data.settings.gsoIco)}" onchange="setGso(this.value)">
+    <div class="row" style="margin-top:10px;"><button class="secondary" onclick="fillKnownCodes()">Doplniť známe kódy Shoptetu</button></div>
+    ${Object.keys(byIco).length ? `<h2 style="margin-top:16px;">Odberatelia (podľa IČO)</h2>` + Object.entries(byIco).sort((a,b) => b[1] - a[1]).map(([ico, q]) =>
+      `<div class="mv" style="align-items:center;"><div class="l" style="flex:1;"><span class="muted">IČO ${esc(ico)} · ${fmtN(q)} ks</span>
+      <input type="text" value="${esc(S.data.customers[ico] || "")}" placeholder="Názov firmy" onchange="setCustomer('${esc(ico)}',this.value)"></div></div>`).join("") : ""}</div>
+    <div class="card"><h2>Nápoje</h2>
+    ${ds.length ? ds.map(d => `<div class="mv" style="align-items:center;"><div class="l" style="flex:1;">
+      <label style="margin:0 0 2px;">Názov</label><input type="text" value="${esc(d.name)}" onchange="renameDrink('${d.id}',this.value)">
+      <label style="margin:6px 0 2px;">Skupina</label><input type="text" value="${esc(d.group || "")}" onchange="regroupDrink('${d.id}',this.value)">
+      <label style="margin:6px 0 2px;">Kód v Shoptete (viac kódov oddeľ čiarkou)</label><input type="text" value="${esc((d.codes || []).join(", "))}" onchange="setCodes('${d.id}',this.value)"></div>
+      <div class="r"><button class="secondary small" onclick="toggleDrink('${d.id}')">${d.hidden ? "Zobraziť" : "Skryť"}</button></div></div>`).join("")
+      : `<div class="empty">Zatiaľ žiadne nápoje.</div>`}
+    <h2 style="margin-top:16px;">Pridať nápoj</h2>
+    <input type="text" id="nd-name" placeholder="Názov nápoja"><input type="text" id="nd-group" style="margin-top:6px;" placeholder="Skupina (napr. ${G1})" value="${G1}">
+    <div class="row" style="margin-top:10px;"><button onclick="addDrink()">Pridať</button></div></div>
+    ${(!DEMO && !S.data.movements.length && !S.data.inventories.length) ? `<div class="card"><h2>Migrácia z v1</h2>
+      <p class="muted">Skopíruje nápoje, príjmy a inventúry zo súboru <b>sklad-data.json</b>. Príjmy dátumované v deň inventúry sa posunú o deň späť
+      (v v1 patrili do končiaceho obdobia, tu sa v deň inventúry začína nové). v1 sa nemení.</p>
+      <button onclick="migrateV1()">Načítať dáta z v1</button></div>` : ""}
+    <div class="card"><h2>O aplikácii</h2><p class="muted">Verzia ${APP_VERSION}${DEMO ? " (ukážkový režim)" : ""}. Používateľ: ${esc(S.user)}.
+      ${DEMO ? `<br><button class="secondary small" style="margin-top:8px;" onclick="if(confirm('Zmazať ukážkové dáta?')){localStorage.removeItem('sklad_v2_demo');location.reload();}">Zmazať ukážkové dáta</button>` : ""}</p></div>`;
+}
+const drinkById = id => S.data.drinks.find(d => d.id === id);
+async function renameDrink(id, v){ v = v.trim(); if (v) await mutate(() => { drinkById(id).name = v; }); }
+async function regroupDrink(id, v){ await mutate(() => { drinkById(id).group = v.trim(); }); }
+async function toggleDrink(id){ await mutate(() => { const d = drinkById(id); d.hidden = !d.hidden; }); }
+async function addDrink(){
+  const name = $("nd-name").value.trim(), group = $("nd-group").value.trim();
+  if (!name) return toast("Zadaj názov");
+  await mutate(() => S.data.drinks.push({ id:uid(), name, group }), "Nápoj pridaný");
+}
+async function migrateV1(){
+  let v1; try { v1 = await Store.loadV1(); } catch(e){ return toast("Chyba: " + e.message); }
+  const invDates = new Set((v1.inventories || []).map(i => i.date)); let shifted = 0;
+  await mutate(() => {
+    S.data.drinks = (v1.drinks || []).map(d => ({ id:d.id, name:d.name, group:LP_NAMES.includes(d.name) ? G1 : G2 }));
+    S.data.movements = (v1.receipts || []).map(r => { const sh = invDates.has(r.date); if (sh) shifted++;
+      return { id:r.id, date:sh ? addDays(r.date, -1) : r.date, drinkId:r.drinkId, qty:r.qty, type:"prijem",
+        note:"Migrované z v1" + (sh ? ` (pôvodný dátum ${fmtD(r.date)}, príjem pred počítaním)` : ""), source:"migracia", by:S.user, at:new Date().toISOString() }; });
+    S.data.inventories = (v1.inventories || []).map(i => ({ id:i.id, date:i.date, counts:i.counts, by:"migracia", at:new Date().toISOString() }));
+    S.data.resolutions = [];
+  }, `Migrované. Posunutých príjmov: ${shifted}`);
+}
+
+/* ---------- import zo Shoptetu (PPP) ---------- */
+function parseCsv(text){
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++){ const c = text[i];
+    if (q){ if (c === '"'){ if (text[i+1] === '"'){ f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ";"){ row.push(f); f = ""; }
+    else if (c === "\n"){ row.push(f); rows.push(row); row = []; f = ""; }
+    else if (c !== "\r") f += c; }
+  if (f !== "" || row.length){ row.push(f); rows.push(row); }
+  return rows;
+}
+function decodeBytes(buf){
+  try { return new TextDecoder("utf-8", { fatal:true }).decode(buf); }
+  catch(e){ return new TextDecoder("windows-1250").decode(buf); }
+}
+/* z CSV vyberie len odoslané produktové riadky; riadky s rovnakým kódom v jednej objednávke sa sčítajú */
+function buildShopLines(text){
+  const rows = parseCsv(text.replace(/^\uFEFF/, ""));
+  if (rows.length < 2) throw new Error("Súbor je prázdny");
+  const h = {}; rows[0].forEach((n, i) => { h[n.trim()] = i; });
+  const miss = ["code","date","statusName","orderItemType","orderItemCode","orderItemName","orderItemAmount","customerIdentificationNumber"].filter(n => !(n in h));
+  if (miss.length) throw new Error("V súbore chýbajú stĺpce: " + miss.join(", "));
+  const map = new Map(), orders = new Set(); let min = "9999-99-99", max = "0000-00-00";
+  for (let r = 1; r < rows.length; r++){ const x = rows[r];
+    if (x.length < 8 || x[h.statusName] !== "Odoslaná" || x[h.orderItemType] !== "product") continue;
+    const c = (x[h.orderItemCode] || "").trim(), q = parseFloat((x[h.orderItemAmount] || "0").replace(",", ".")) || 0;
+    if (!c || !q) continue;
+    const o = x[h.code].trim(), d = x[h.date].slice(0, 10), i = (x[h.customerIdentificationNumber] || "").trim();
+    orders.add(o); if (d < min) min = d; if (d > max) max = d;
+    const k = o + "|" + c, cur = map.get(k);
+    if (cur) cur.q += q; else map.set(k, { o, d, i, c, n:(x[h.orderItemName] || "").slice(0, 60), q });
+  }
+  return { lines:[...map.values()], orders:orders.size, min, max };
+}
+async function importShoptetText(text, fileName){
+  const b = buildShopLines(text);
+  if (!b.lines.length) throw new Error("Nenašli sa žiadne odoslané produktové riadky");
+  const old = S.shop.lines, keyOf = l => l.o + "|" + l.c;
+  const oldKeys = new Set(old.filter(l => l.d >= b.min && l.d <= b.max).map(keyOf)), newKeys = new Set(b.lines.map(keyOf));
+  const added = [...newKeys].filter(k => !oldKeys.has(k)).length, removed = [...oldKeys].filter(k => !newKeys.has(k)).length;
+  const known = new Set(S.data.drinks.flatMap(d => d.codes || [])), un = {};
+  b.lines.forEach(l => { if (!known.has(l.c)){ const u = un[l.c] || (un[l.c] = { code:l.c, name:l.n, qty:0 }); u.qty += l.q; } });
+  const unmapped = Object.values(un).sort((a, c) => c.qty - a.qty).slice(0, 12);
+  return await mutateShop(() => {
+    S.shop.lines = old.filter(l => l.d < b.min || l.d > b.max).concat(b.lines).sort((a, c) => a.d.localeCompare(c.d));
+    S.shop.meta = { at:new Date().toISOString(), by:S.user, file:fileName, from:b.min, to:b.max, orders:b.orders, lines:b.lines.length, added, removed, unmapped };
+  }, `Import hotový: ${b.orders} objednávok, nových riadkov ${added}, odstránených ${removed}`);
+}
+async function onShopFile(inp){
+  const f = inp.files[0]; if (!f) return;
+  try { await importShoptetText(decodeBytes(await f.arrayBuffer()), f.name); }
+  catch(e){ toast("Import zlyhal: " + e.message); }
+  inp.value = "";
+}
+async function setGso(v){ await mutate(() => { S.data.settings.gsoIco = v.trim(); }, "IČO GSO uložené"); }
+async function setCustomer(ico, v){ await mutate(() => { v = v.trim(); if (v) S.data.customers[ico] = v; else delete S.data.customers[ico]; }); }
+async function setCodes(id, v){ await mutate(() => { drinkById(id).codes = v.split(/[,\s]+/).map(s => s.trim()).filter(Boolean); }); }
+async function fillKnownCodes(){
+  let n = 0;
+  await mutate(() => S.data.drinks.forEach(d => { const k = KNOWN_CODES[d.name]; if (k && !(d.codes || []).length){ d.codes = [...k]; n++; } }),
+    "Kódy doplnené pri nápojoch: " + n);
+}
+
+/* ---------- hromadné vysvetlenie kladných rozdielov ---------- */
+function openBulk(invId){
+  const items = openDiscrepancies().filter(x => x.B.id === invId && x.c.diff > 0);
+  if (!items.length) return;
+  const B = items[0].B, A = items[0].A, tot = items.reduce((s, x) => s + x.c.diff, 0);
+  $("modal").innerHTML = `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="box">
+    <h3>Vysvetliť ${items.length} kladných rozdielov naraz</h3>
+    <p class="muted">Obdobie ${fmtD(A.date)} až ${fmtD(B.date)}. Spolu ${fmtN(tot)} ks napočítaných navyše: ${items.map(x => esc(x.drink.name) + " " + sgn(x.c.diff)).join(", ")}.
+    Každý rozdiel sa vysvetlí ako chýbajúce naskladnenie: doplní sa príjem v daný deň pred inventúrou (${fmtD(addDays(B.date, -1))}).</p>
+    <label for="bk-note">Poznámka (povinná)</label>
+    <textarea id="bk-note">Priamo z výroby ku klientovi, nezapísané ako naskladnenie</textarea>
+    <div class="row" style="margin-top:12px;"><button class="secondary" onclick="closeModal()">Zrušiť</button>
+    <button onclick="doBulk('${invId}')">Doplniť príjmy</button></div></div></div>`;
+}
+async function doBulk(invId){
+  const note = $("bk-note").value.trim(); if (!note) return toast("Doplň poznámku");
+  const items = openDiscrepancies().filter(x => x.B.id === invId && x.c.diff > 0), now = new Date().toISOString();
+  const ok = await mutate(() => items.forEach(x => { const mid = uid();
+    S.data.movements.push({ id:mid, date:addDays(x.B.date, -1), drinkId:x.drink.id, qty:x.c.diff, type:"prijem",
+      note:"Doplnené pri vysvetlení nezrovnalosti: " + note, source:"vysvetlenie", by:S.user, at:now });
+    S.data.resolutions.push({ id:uid(), invId, drinkId:x.drink.id, reason:"chyba_prijem", note, diff:x.c.diff,
+      expected:x.c.expected, counted:x.c.counted, movementId:mid, by:S.user, at:now }); }), `Vysvetlené: ${items.length}`);
+  if (ok) closeModal();
+}
+
+/* ---------- ukážkové dáta (vymyslené čísla) ---------- */
+function seedDemo(){
+  const d = emptyData();
+  d.drinks = [["a","Orange",G1],["b","Marakuja",G1],["c","Granát",G1],["d","Pure",G1],["e","Krab 0,5 plech",G2]]
+    .map(x => ({ id:x[0], name:x[1], group:x[2] }));
+  d.inventories = [
+    { id:"i1", date:"2026-08-03", counts:{ a:200, b:170, c:230, d:130, e:90 } },
+    { id:"i2", date:"2026-09-01", counts:{ a:160, b:260, c:380, d:240, e:60 } },
+    { id:"i3", date:"2026-10-02", counts:{ a:250, b:300, c:130, d:200, e:120 } }];
+  const mv = (date, drinkId, qty, type, customer) => d.movements.push({ id:uid(), date, drinkId, qty, type, customer, source:"demo" });
+  mv("2026-08-10","a",540,"prijem"); mv("2026-08-10","b",700,"prijem"); mv("2026-08-10","c",710,"prijem"); mv("2026-08-10","d",280,"prijem");
+  mv("2026-08-31","a",580,"predaj","GSO"); mv("2026-08-31","b",600,"predaj","GSO"); mv("2026-08-31","c",570,"predaj","GSO"); mv("2026-08-31","d",170,"predaj","GSO");
+  mv("2026-09-11","a",1120,"prijem"); mv("2026-09-11","b",1110,"prijem"); mv("2026-09-23","c",430,"prijem"); mv("2026-09-23","e",170,"prijem");
+  mv("2026-09-30","a",1040,"predaj","GSO"); mv("2026-09-30","b",1070,"predaj","GSO"); mv("2026-09-30","c",670,"predaj","GSO"); mv("2026-09-30","d",30,"predaj","GSO");
+  mv("2026-09-04","b",96,"predaj","Firma Alfa s.r.o."); mv("2026-09-23","b",36,"predaj","Firma Beta a.s."); mv("2026-09-23","c",40,"predaj","Firma Alfa s.r.o.");
+  mv("2026-09-15","a",12,"rozdane"); d.movements[d.movements.length-1].note = "vzorky na veľtrh";
+  mv("2026-09-20","e",100,"predaj","Firma Gama");
+  return d;
+}
+
+/* ---------- štart ---------- */
+async function spustit(){
+  $("auth-gate").style.display = "none"; $("app-loading").style.display = "flex";
+  try {
+    S.user = DEMO ? "demo" : (account.username || account.name || "");
+    await loadAll();
+    if (DEMO) await Store.save(FILE_V2, "etag", S.data);
+    $("app-loading").style.display = "none"; $("app-root").style.display = "block";
+    if (DEMO) $("demo-bar").style.display = "block";
+    go(S.data.inventories.length ? "cesta" : (S.data.drinks.length ? "inventura" : "nastavenia"));
+  } catch(e){
+    console.error(e);
+    $("loading-text").innerHTML = `Chyba pri načítaní: <span style="color:var(--danger)">${esc(e.message)}</span><br><br>` +
+      (DEMO ? "" : `<button onclick="odhlasit()">Odhlásiť sa a skúsiť znova</button>`);
+  }
+}
+window.addEventListener("load", async () => {
+  if (DEMO) return spustit();
+  await initMsal();
+  if (account) spustit(); else $("auth-gate").style.display = "flex";
+});
+</script>
+</body>
+</html>
