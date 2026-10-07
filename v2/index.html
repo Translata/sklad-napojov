@@ -134,7 +134,7 @@
    Rozdiel = napočítané pri B - očakávaný stav. Nezrovnalosť sa vysvetľuje v Kontrole, nič sa nemaže (soft delete).
    Dáta: Sklad-app/sklad-data-v2.json na SharePointe (alebo ?demo=1: localStorage s vymyslenými dátami). */
 
-const APP_VERSION = "v2.1-fáza2";
+const APP_VERSION = "v2.2-fáza2";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -434,8 +434,10 @@ function renderPohyby(){
   const meta = S.shop.meta, haveCodes = S.data.drinks.some(d => (d.codes || []).length), gso = S.data.settings.gsoIco;
   el.innerHTML = `<div class="card"><h2>Import zo Shoptetu (PPP)</h2>
     <p class="muted">Nahraj CSV export objednávok (stav Odoslaná, riadok na položku). Predaj sa prepíše do pohybov, ručné záznamy sa nemenia.
-    Ak ste ten istý predaj zapisovali ručne, zmažte ho, inak sa započíta dvakrát.</p>
-    ${!gso ? `<p class="muted" style="color:var(--danger);">Nastav IČO GSO v Nastaveniach, inak sa predaj GSO nerozlíši od ostatných firiem.</p>` : ""}
+    Ak ste ten istý predaj zapisovali ručne, zmažte ho, inak sa započíta dvakrát.
+    Názvy firiem a IČO GSO sa doplnia automaticky, ak export obsahuje stĺpec „fakturačná adresa – spoločnosť“.</p>
+    ${S.shop.meta && S.shop.meta.hasNames === false ? `<p class="muted" style="color:var(--danger);">Posledný export nemal stĺpec s názvom firmy, preto sa odberatelia zobrazujú len ako IČO. Pridaj ho do šablóny exportu v Shoptete.</p>` : ""}
+    ${!gso ? `<p class="muted" style="color:var(--danger);">IČO GSO ešte nie je nastavené (doplní sa z exportu, ak obsahuje názov firmy, inak ho zadaj v Nastaveniach).</p>` : ""}
     ${!haveCodes ? `<p class="muted" style="color:var(--danger);">Nápoje nemajú kódy Shoptetu. V Nastaveniach ich doplň (tlačidlo „Doplniť známe kódy“).</p>` : ""}
     <input type="file" id="shop-file" accept=".csv,text/csv,text/plain" onchange="onShopFile(this)">
     ${meta ? `<p class="muted" style="margin-top:8px;">Posledný import ${fmtD(meta.at.slice(0,10))} (${esc(meta.by || "")}): ${meta.orders} objednávok, ${fmtD(meta.from)} až ${fmtD(meta.to)}, ${meta.lines} riadkov (nových ${meta.added}, odstránených ${meta.removed}).</p>
@@ -592,7 +594,7 @@ function renderNastavenia(){
     <label for="gso-ico">IČO spoločnosti GSO (jej objednávky sú doklad za predaj GSO)</label>
     <input type="text" id="gso-ico" inputmode="numeric" value="${esc(S.data.settings.gsoIco)}" onchange="setGso(this.value)">
     <div class="row" style="margin-top:10px;"><button class="secondary" onclick="fillKnownCodes()">Doplniť známe kódy Shoptetu</button></div>
-    ${Object.keys(byIco).length ? `<h2 style="margin-top:16px;">Odberatelia (podľa IČO)</h2>` + Object.entries(byIco).sort((a,b) => b[1] - a[1]).map(([ico, q]) =>
+    ${Object.keys(byIco).length ? `<h2 style="margin-top:16px;">Odberatelia (podľa IČO, názov sa dopĺňa z exportu)</h2>` + Object.entries(byIco).sort((a,b) => b[1] - a[1]).map(([ico, q]) =>
       `<div class="mv" style="align-items:center;"><div class="l" style="flex:1;"><span class="muted">IČO ${esc(ico)} · ${fmtN(q)} ks</span>
       <input type="text" value="${esc(S.data.customers[ico] || "")}" placeholder="Názov firmy" onchange="setCustomer('${esc(ico)}',this.value)"></div></div>`).join("") : ""}</div>
     <div class="card"><h2>Nápoje</h2>
@@ -657,17 +659,21 @@ function buildShopLines(text){
   const h = {}; rows[0].forEach((n, i) => { h[n.trim()] = i; });
   const miss = ["code","date","statusName","orderItemType","orderItemCode","orderItemName","orderItemAmount","customerIdentificationNumber"].filter(n => !(n in h));
   if (miss.length) throw new Error("V súbore chýbajú stĺpce: " + miss.join(", "));
+  const compCol = ["billCompany","billingCompany","company","billCompanyName"].find(n => n in h)
+    ?? Object.keys(h).find(n => /company/i.test(n) && !/item/i.test(n));
+  const names = {};
   const map = new Map(), orders = new Set(); let min = "9999-99-99", max = "0000-00-00";
   for (let r = 1; r < rows.length; r++){ const x = rows[r];
     if (x.length < 8 || x[h.statusName] !== "Odoslaná" || x[h.orderItemType] !== "product") continue;
     const c = (x[h.orderItemCode] || "").trim(), q = parseFloat((x[h.orderItemAmount] || "0").replace(",", ".")) || 0;
     if (!c || !q) continue;
     const o = x[h.code].trim(), d = x[h.date].slice(0, 10), i = (x[h.customerIdentificationNumber] || "").trim();
+    if (compCol && i){ const nm = (x[h[compCol]] || "").trim(); if (nm) names[i] = nm; }
     orders.add(o); if (d < min) min = d; if (d > max) max = d;
     const k = o + "|" + c, cur = map.get(k);
     if (cur) cur.q += q; else map.set(k, { o, d, i, c, n:(x[h.orderItemName] || "").slice(0, 60), q });
   }
-  return { lines:[...map.values()], orders:orders.size, min, max };
+  return { lines:[...map.values()], orders:orders.size, min, max, names, hasNames:!!compCol };
 }
 async function importShoptetText(text, fileName){
   const b = buildShopLines(text);
@@ -678,10 +684,20 @@ async function importShoptetText(text, fileName){
   const known = new Set(S.data.drinks.flatMap(d => d.codes || [])), un = {};
   b.lines.forEach(l => { if (!known.has(l.c)){ const u = un[l.c] || (un[l.c] = { code:l.c, name:l.n, qty:0 }); u.qty += l.q; } });
   const unmapped = Object.values(un).sort((a, c) => c.qty - a.qty).slice(0, 12);
-  return await mutateShop(() => {
+  const ok = await mutateShop(() => {
     S.shop.lines = old.filter(l => l.d < b.min || l.d > b.max).concat(b.lines).sort((a, c) => a.d.localeCompare(c.d));
-    S.shop.meta = { at:new Date().toISOString(), by:S.user, file:fileName, from:b.min, to:b.max, orders:b.orders, lines:b.lines.length, added, removed, unmapped };
+    S.shop.meta = { at:new Date().toISOString(), by:S.user, file:fileName, from:b.min, to:b.max, orders:b.orders, lines:b.lines.length, added, removed, unmapped, hasNames:b.hasNames };
   }, `Import hotový: ${b.orders} objednávok, nových riadkov ${added}, odstránených ${removed}`);
+  if (ok) await applyNames(b.names);
+  return ok;
+}
+/* Názvy firiem z exportu doplnia len chýbajúce (ručne zadaný názov má prednosť); firma „Good Stuff Only“ nastaví IČO GSO, ak ešte nie je. */
+async function applyNames(names){
+  const miss = Object.entries(names).filter(([i]) => !S.data.customers[i]);
+  const gso = !S.data.settings.gsoIco && Object.entries(names).find(([, n]) => /good\s*stuff\s*only/i.test(n));
+  if (!miss.length && !gso) return;
+  await mutate(() => { miss.forEach(([i, n]) => { S.data.customers[i] = n; }); if (gso) S.data.settings.gsoIco = gso[0]; },
+    `Z exportu doplnené názvy firiem: ${miss.length}${gso ? ", IČO GSO nastavené" : ""}`);
 }
 async function onShopFile(inp){
   const f = inp.files[0]; if (!f) return;
