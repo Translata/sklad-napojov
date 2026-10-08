@@ -75,13 +75,19 @@ def env(name, required=True):
 
 def http(url, data=None, headers=None, method=None):
     req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            return r.read()
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")[:300]
-        # bez query stringu, odkazy môžu obsahovať tajné hashe
-        sys.exit(f"HTTP {e.code} z {url.split('?')[0][:80]}: {body}")
+    # bez query stringu, odkazy môžu obsahovať tajné hashe
+    where = url.split("?")[0][:80]
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")[:300]
+            sys.exit(f"HTTP {e.code} z {where}: {body}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if attempt == 3:
+                sys.exit(f"Spojenie s {where.split('/')[2]} zlyhalo: {getattr(e, 'reason', e)}")
+            time.sleep(10 * (attempt + 1))
 
 
 # ---------- Shoptet (PPP) ----------
