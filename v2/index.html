@@ -160,7 +160,7 @@
      neevidované = GSO - Shopify - rozdané na akciách       (záporné = chyba v dátach)
    Pri nápojoch, ktoré GSO nepredáva: neevidované = odišlo - Shoptet priamo - rozdané. */
 
-const APP_VERSION = "v3.0";
+const APP_VERSION = "v3.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -186,8 +186,8 @@ const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDa
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, "");
 function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
-const emptyData = () => ({ version:3, drinks:[], receipts:[], counts:[], giveaways:[] });
-function normalize(d){ ["drinks","receipts","counts","giveaways"].forEach(k => d[k] = d[k] || []);
+const emptyData = () => ({ version:3, drinks:[], receipts:[], counts:[], giveaways:[], beforeCount:{} });
+function normalize(d){ ["drinks","receipts","counts","giveaways"].forEach(k => d[k] = d[k] || []); d.beforeCount = d.beforeCount || {};
   d.drinks.forEach(x => { if (!x.key) x.key = x.name; if (x.gso === undefined) x.gso = x.group === G_LP; }); return d; }
 
 const drinks = (all) => S.data.drinks.filter(d => all || !d.hidden);
@@ -200,7 +200,9 @@ const groups = list => { const g = {}; list.forEach(d => (g[d.group || G_OTHER] 
 function salesFor(){
   const byKey = {}; S.data.drinks.forEach(d => { byKey[norm(d.key)] = d.id; });
   const sh = [], sf = []; const s = S.sales || {};
-  (s.shoptet || []).forEach(l => { const id = byKey[norm(l.k)]; if (id) sh.push({ ...l, drinkId:id }); });
+  // objednávka odoslaná v deň inventúry ešte pred počítaním patrí do predchádzajúceho obdobia
+  (s.shoptet || []).forEach(l => { const id = byKey[norm(l.k)];
+    if (id) sh.push({ ...l, d:S.data.beforeCount[l.o] ? addDays(l.d, -1) : l.d, drinkId:id }); });
   (s.shopify || []).forEach(l => { const id = byKey[norm(l.k)]; if (id) sf.push({ ...l, drinkId:id }); });
   return { sh, sf };
 }
@@ -441,12 +443,28 @@ function renderInventura(){
     <div class="card"><label for="i-date" style="margin-top:0">Dátum</label><input type="date" id="i-date" value="${todayISO()}">
     <p class="muted">Napočítaj stav na začiatku dňa. Príjmy a predaje z dňa inventúry patria už do nového obdobia. Vyplň všetky nápoje, aj nuly.</p>
     ${qtyList("i")}<button class="block" onclick="saveInventura()">Uložiť inventúru</button></div>`;
+  h += countDayOrders();
   h += `<div class="card"><h3>Inventúry</h3>` + (I.length ? [...I].reverse().map((c, i) => `<div class="entry"><div class="l"><b>${fmtD(c.date)}</b>
       <div class="muted">${c.by ? esc(c.by) : ""}</div></div><div class="r"><b class="num">${fmtN(Object.values(c.counts).reduce((s, n) => s + n, 0))}</b><br>
       ${i === 0 ? `<button class="del" onclick="delInventura('${c.id}')">Zmazať</button>` : ""}</div></div>`).join("")
     : `<div class="empty">Zatiaľ žiadna inventúra.</div>`) + `</div>`;
   el.innerHTML = h; qtyTotal("i");
 }
+/* priame objednávky zo Shoptetu s dátumom inventúry: treba určiť, či odišli pred počítaním */
+function countDayOrders(){
+  const days = new Set(S.data.counts.map(c => c.date)), o = {};
+  ((S.sales || {}).shoptet || []).filter(l => !l.gso && days.has(l.d)).forEach(l => {
+    const d = S.data.drinks.find(x => norm(x.key) === norm(l.k)); if (!d || d.hidden) return;
+    const x = o[l.o] = o[l.o] || { o:l.o, d:l.d, c:l.c, items:[], n:0 }; x.items.push(`${d.name} ${fmtN(l.q)}`); x.n += l.q; });
+  const list = Object.values(o).sort((a, b) => b.d.localeCompare(a.d) || a.o.localeCompare(b.o));
+  if (!list.length) return "";
+  return `<div class="card"><h3>Objednávky zo Shoptetu z dňa inventúry</h3>
+    <p class="muted" style="margin-top:0">Označ tie, ktoré odišli zo skladu ešte pred počítaním. Inak sa odpočítajú až v novom období.</p>` +
+    list.map(x => `<div class="entry"><div class="l"><b>${esc(x.o)}</b> · ${fmtD(x.d)}<div class="muted">${esc(x.c)} · ${esc(x.items.join(", "))}</div>
+      <label style="margin:6px 0 0;color:var(--text);font-size:14px"><input type="checkbox" ${S.data.beforeCount[x.o] ? "checked" : ""} onchange="setBefore('${esc(x.o)}',this.checked)"> Odišla pred počítaním</label></div>
+      <div class="r"><b class="num">${fmtN(x.n)}</b></div></div>`).join("") + `</div>`;
+}
+async function setBefore(o, v){ await mutate(() => { if (v) S.data.beforeCount[o] = true; else delete S.data.beforeCount[o]; }, "Uložené"); }
 async function saveInventura(){
   const date = $("i-date").value, c = qtyRead("i", true);
   if (!date) return toast("Zadaj dátum");
