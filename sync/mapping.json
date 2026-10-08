@@ -1,0 +1,267 @@
+{
+  "_poznamka": "Mapovanie nápoj -> EAN (SKUs.xlsx) -> ID v appke -> produkt/varianty v Shopify. EAN je kód jednej plechovky. Shopify varianty nemajú SKU, mapovanie ide cez ID variantu. Zmiešané balenia (Discovery Pack, Fruit Pack, Dual Recovery) a produkty mimo Shopify (Krab, pivá) zatiaľ nie sú namapované.",
+  "drinks": [
+    {
+      "name": "Outlast",
+      "ean": "8588007511566",
+      "appDrinkId": "msdk5pzx75sh8h",
+      "shopifyProductId": "gid://shopify/Product/15745338868044",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57483004313932",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57483004346700",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57878736470348",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Cherry",
+      "ean": "8588007511559",
+      "appDrinkId": "msdk5pzxwcerna",
+      "shopifyProductId": "gid://shopify/Product/15740928590156",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57469617045836",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57469617078604",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57878746825036",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Granat",
+      "ean": "8588007511528",
+      "appDrinkId": "msdk5pzxt40vul",
+      "shopifyProductId": "gid://shopify/Product/15533955613004",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856511316300",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856511349068",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57022127898956",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Marakuja",
+      "ean": "8588007511511",
+      "appDrinkId": "msdk5pzx0odejk",
+      "shopifyProductId": "gid://shopify/Product/15533937000780",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856502731084",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856502763852",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57020952772940",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Orange",
+      "ean": "8588007511535",
+      "appDrinkId": "msdk5pzxjbekfg",
+      "shopifyProductId": "gid://shopify/Product/15533954728268",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856520294732",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856520327500",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57021275341132",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Pure",
+      "ean": "8588007511504",
+      "appDrinkId": "msdk5pzxmmzmzc",
+      "shopifyProductId": "gid://shopify/Product/15533933494604",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56841815359820",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56841815392588",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57020795421004",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    },
+    {
+      "name": "Cannabis",
+      "ean": "8588007511542",
+      "appDrinkId": "msdk5pzxyptiuu",
+      "shopifyProductId": "gid://shopify/Product/15533953712460",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856545100108",
+          "cans": 12
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56856545132876",
+          "cans": 24
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57021294215500",
+          "cans": 1,
+          "poznamka": "jednotlivá plechovka, produkt UNLISTED, SKU = EAN"
+        }
+      ]
+    }
+  ],
+  "mixed": [
+    {
+      "name": "Isotonic Dual Recovery",
+      "shopifyProductId": "gid://shopify/Product/15756457804108",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57527276798284",
+          "cans": {
+            "Cherry": 6,
+            "Outlast": 6
+          }
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/57527276831052",
+          "cans": {
+            "Cherry": 12,
+            "Outlast": 12
+          }
+        }
+      ]
+    },
+    {
+      "name": "Liquid Positive - Discovery Pack",
+      "shopifyProductId": "gid://shopify/Product/15618463695180",
+      "zdroj": "popis na liquidpositive.com",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56950701621580",
+          "cans": {
+            "Pure": 2,
+            "Marakuja": 3,
+            "Orange": 3,
+            "Granat": 3,
+            "Cannabis": 1
+          }
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56950701654348",
+          "cans": {
+            "Pure": 4,
+            "Marakuja": 6,
+            "Orange": 6,
+            "Granat": 6,
+            "Cannabis": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "Liquid Positive - Fruit Pack",
+      "shopifyProductId": "gid://shopify/Product/15606753460556",
+      "zdroj": "popis na liquidpositive.com",
+      "variants": [
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56879409234252",
+          "cans": {
+            "Marakuja": 4,
+            "Orange": 4,
+            "Granat": 4
+          }
+        },
+        {
+          "shopifyVariantId": "gid://shopify/ProductVariant/56879409267020",
+          "cans": {
+            "Marakuja": 8,
+            "Orange": 8,
+            "Granat": 8
+          }
+        }
+      ]
+    }
+  ],
+  "nenamapovane": [
+    "Krab 0,5 plech a pivá nie sú v Shopify"
+  ],
+  "ignorovat": [
+    "gid://shopify/ProductVariant/57023272255820",
+    "gid://shopify/ProductVariant/57953686356300",
+    "gid://shopify/ProductVariant/56950597058892",
+    "gid://shopify/ProductVariant/56950599287116"
+  ],
+  "_poznamkaIgnorovat": "Zálohy na obaly (Vratná záloha, Refundable deposit), nie nápoje.",
+  "shoptet": {
+    "_poznamka": "orderItemCode v Shoptet exporte -> nápoj v appke (názvy ako v sklad-data.json). Kegy, NILIO, zálohy a ostatné sa nesledujú.",
+    "codes": {
+      "316": "Pure",
+      "317": "Cannabis",
+      "318": "Granat",
+      "319": "Marakuja",
+      "320": "Orange",
+      "454": "Cherry",
+      "459": "Outlast",
+      "362": "Krab 0,5 plech",
+      "98": "Jedenastka 1L plast",
+      "99": "Vandal 14°1L plast",
+      "100": "Cervena veza 12°1L plast",
+      "198": "APAc 13°1L plast",
+      "68": "Jedenastka 0,75 sklo",
+      "74": "Vandal 14°0,75 sklo",
+      "65": "Cervena veza 12°0,75 sklo",
+      "62": "APAc 13°0,75 sklo"
+    },
+    "ignorovat": [
+      "Z15",
+      "Z50",
+      "záloha-keg"
+    ],
+    "mixed": {
+      "460": {
+        "Cherry": 3,
+        "Outlast": 3
+      }
+    },
+    "_poznamkaMixed": "Zmiešané balenia v Shoptete: kód -> plechovky na 1 kus (460 = Izotonický Mix 6 ks)."
+  }
+}

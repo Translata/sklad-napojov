@@ -1,0 +1,6 @@
+.env
+import/output/
+__pycache__/
+import/samples/
+import/NAVRH*.md
+.DS_Store
