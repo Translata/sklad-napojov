@@ -48,6 +48,7 @@ query($q: String!, $after: String) {
     nodes {
       name createdAt cancelledAt
       billingAddress { company }
+      customer { displayName }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
         nodes { id title currentQuantity variant { id } }
@@ -212,7 +213,11 @@ def shopify_lines(mapping, since):
                 sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
             n_orders += 1
             day = local_day(o["createdAt"])
-            company = ((o.get("billingAddress") or {}).get("company") or "").strip() or PRIVATE
+            # odberateľ: firma z fakturačnej adresy; pri B2B (jednotlivé plechovky) inak meno zo zákazníckeho profilu,
+            # pri B2C bez firmy sa meno osoby neukladá
+            b2b = any(variants.get((li["variant"] or {}).get("id"), (None, ""))[1] == "B2B" for li in o["lineItems"]["nodes"])
+            company = ((o.get("billingAddress") or {}).get("company") or "").strip() \
+                or (((o.get("customer") or {}).get("displayName") or "").strip() if b2b else "") or PRIVATE
             # odoslané kusy podľa dátumu odoslania (fulfillment); zvyšok sa počíta k dátumu objednávky
             sent = defaultdict(list)
             for f in o["fulfillments"]:
