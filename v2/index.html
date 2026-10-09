@@ -108,6 +108,20 @@
   .toast{position:fixed; bottom:92px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 18px;
     border-radius:10px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s; z-index:30; max-width:90%; text-align:center;}
   .toast.show{opacity:1;}
+  /* mesiac */
+  .seg{display:flex; background:#e5e7eb; border-radius:10px; padding:3px; gap:3px; margin-bottom:12px;}
+  .seg button{flex:1; background:none; color:var(--muted); padding:8px 4px; font-size:13px; font-weight:600; border-radius:8px;}
+  .seg button.on{background:#fff; color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .big{font-size:26px; font-weight:800; letter-spacing:-.03em; margin:2px 0;}
+  .big.bad{color:var(--danger);} .big.ok{color:var(--ok);} .big.warn{color:var(--warn);}
+  .flow{font-size:13px; color:var(--muted); margin-top:4px;}
+  table.t{font-size:14px;} table.t th{font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    text-align:right; padding:0 0 6px 6px; border-bottom:1px solid var(--border);} table.t th:first-child{text-align:left; padding-left:0;}
+  table.t td{text-align:right; padding:9px 0 9px 6px; font-variant-numeric:tabular-nums; white-space:nowrap;} table.t td:first-child{text-align:left; padding-left:0; white-space:normal;}
+  table.t tr.click{cursor:pointer;} table.t tr.sumr td{font-weight:700; border-top:1px solid var(--border); border-bottom:none;}
+  table.t td.bad{color:var(--danger); font-weight:700;} table.t td.warn{color:var(--warn); font-weight:700;} table.t td.ok{color:var(--ok);}
+  table.t tr.det td{background:var(--bg); padding:8px 10px; white-space:normal; text-align:left;}
+  .caret{color:var(--faint); font-size:11px; margin-left:4px;}
   .demo{background:var(--warn-soft); color:var(--warn); text-align:center; font-size:12px; padding:4px;}
 </style>
 </head>
@@ -160,7 +174,7 @@
    Ručne sa zadáva: príjem, výdaj (propagácia, predaj mimo Shopify, odpis), inventúra.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v4.0";
+const APP_VERSION = "v4.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -176,7 +190,7 @@ const OUT = {
   odpis:     { label:"Odpis", field:"Dôvod", ph:"napr. rozbité pri vykládke", gso:false }
 };
 
-let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia" };
+let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null };
 
 /* ---------- pomocné ---------- */
 const $ = id => document.getElementById(id);
@@ -239,8 +253,9 @@ function calc(A, B, d, sales){
 }
 /* riadky rozpisu výdajov pre jeden nápoj */
 function outLines(r){
-  return ln("− PPP (Shoptet)", fmtN(r.ppp)) + ln("− GSO Shopify balíčky", fmtN(r.b2c)) + ln("− GSO Shopify plechovky", fmtN(r.b2b))
-    + ln("− GSO predaj mimo Shopify", fmtN(r.mimo)) + ln("− Propagácia (GSO)", fmtN(r.propagacia)) + ln("− Odpisy", fmtN(r.odpis));
+  return [["− PPP (Shoptet)", r.ppp], ["− GSO Shopify balíčky", r.b2c], ["− GSO Shopify plechovky", r.b2b],
+    ["− GSO predaj mimo Shopify", r.mimo], ["− Propagácia (GSO)", r.propagacia], ["− Odpisy", r.odpis]]
+    .filter(([, n]) => n).map(([l, n]) => ln(l, fmtN(n))).join("");
 }
 
 /* ---------- úložisko ---------- */
@@ -494,6 +509,8 @@ async function delInventura(id){
 }
 
 /* ---------- MESIAC ---------- */
+const diffCls = n => n < 0 ? "bad" : n > 0 ? "warn" : "ok";
+const diffWord = n => n < 0 ? "Manko" : n > 0 ? "Prebytok" : "Sedí";
 function renderMesiac(){
   const el = $("screen-mesiac");
   if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
@@ -502,44 +519,63 @@ function renderMesiac(){
   const P = []; for (let i = 1; i < I.length; i++) P.push([I[i-1], I[i]]);
   if (S.period === null || S.period >= P.length) S.period = P.length - 1;
   const [A, B] = P[S.period], sales = salesFor(), inP = x => x >= A.date && x < B.date;
-  let h = `<div class="title"><h2>Mesiac</h2><span class="muted">${fmtD(A.date)} až ${fmtD(addDays(B.date, -1))}</span></div>
-    <div class="chips">${P.map(([a, b], i) => `<button class="${i === S.period ? "on" : ""}" onclick="S.period=${i};renderMesiac()">${fmtDs(a.date)} – ${fmtDs(addDays(b.date, -1))}</button>`).reverse().join("")}</div>`;
+  const G = groups(drinks()); if (!G.some(([g]) => g === S.mGroup)) S.mGroup = G[0][0];
+  const list = G.find(([g]) => g === S.mGroup)[1];
+  const rows = list.map(d => ({ d, r:calc(A, B, d, sales) })), ok = rows.filter(x => !x.r.missing);
+  const T = k => ok.reduce((s, x) => s + (x.r[k] || 0), 0);
+  const hasGso = T("gsoInv") > 0;
+  if (S.mTab === "gso" && !hasGso) S.mTab = "sklad";
+
+  let h = `<div class="title"><h2>Mesiac</h2></div>
+    <div class="chips">${P.map(([a, b], i) => `<button class="${i === S.period ? "on" : ""}" onclick="S.period=${i};S.mOpen=null;renderMesiac()">${fmtDs(a.date)} – ${fmtDs(addDays(b.date, -1))}</button>`).reverse().join("")}</div>`;
+  if (G.length > 1) h += `<div class="seg">${G.map(([g]) => `<button class="${g === S.mGroup ? "on" : ""}" onclick="S.mGroup='${esc(g)}';S.mOpen=null;renderMesiac()">${esc(g)}</button>`).join("")}</div>`;
+
+  // výsledok obdobia
+  const diff = T("diff");
+  h += `<div class="card"><div class="muted">Výsledok inventúry ${fmtDs(B.date)}</div>
+    <div class="big num ${diffCls(diff)}">${diff ? `${diffWord(diff)} ${fmtN(Math.abs(diff))} ks` : "Všetko sedí"}</div>
+    <div class="flow">Príjem ${fmtN(T("prod"))} · PPP ${fmtN(T("ppp"))}${hasGso ? ` · GSO ${fmtN(T("gsoInv"))}` : ""} · odpisy ${fmtN(T("odpis"))}</div></div>`;
   const open = ((S.sales || {}).shopifyOpen || []).filter(o => inP(o.d));
-  if (open.length) h += `<div class="note">V Shopify nie sú označené ako odoslané: ${open.map(o => `${esc(o.o)} (${fmtDs(o.d)}, ${fmtN(o.q)} ks)`).join(", ")}. Počítajú sa ku dňu objednávky. Ak už odišli, treba ich v Shopify označiť ako odoslané.</div>`;
-  const rows = drinks().map(d => ({ d, r:calc(A, B, d, sales) }));
+  if (open.length && hasGso) h += `<div class="note">${open.length} ${open.length === 1 ? "objednávka" : "objednávky"} v Shopify bez označenia odoslané (${fmtN(open.reduce((s, o) => s + o.q, 0))} ks): ${open.map(o => esc(o.o)).join(", ")}. Počítajú sa ku dňu objednávky.</div>`;
 
-  groups(drinks()).forEach(([g, list]) => {
-    const rs = rows.filter(x => list.includes(x.d) && !x.r.missing), T = k => rs.reduce((s, x) => s + (x.r[k] || 0), 0);
-    const diff = T("diff");
-    h += `<div class="card"><h3>${esc(g)} spolu</h3><div class="kpis">
-      <div class="kpi"><div class="l">Príjem</div><div class="v num">${fmtN(T("prod"))}</div></div>
-      <div class="kpi"><div class="l">PPP (Shoptet)</div><div class="v num">${fmtN(T("ppp"))}</div></div>
-      ${T("gsoInv") ? `<div class="kpi hl"><div class="l">Faktúra GSO</div><div class="v num">${fmtN(T("gsoInv"))}</div></div>` : ""}
-      <div class="kpi"><div class="l">Odpisy</div><div class="v num">${fmtN(T("odpis"))}</div></div>
-      <div class="kpi ${diff < 0 ? "bad" : ""}"><div class="l">${diff < 0 ? "Manko" : diff > 0 ? "Prebytok" : "Rozdiel"}</div><div class="v num">${fmtS(diff)}</div></div>
-      </div></div>`;
-    if (T("gsoInv")) h += `<div class="card"><h3>Faktúra GSO, ${esc(g)}</h3><table>${rs.filter(x => x.r.gsoInv).map(x =>
-      `<tr><td>${esc(x.d.name)}<div class="muted">Shopify ${fmtN(x.r.shopify)} · mimo Shopify ${fmtN(x.r.mimo)} · propagácia ${fmtN(x.r.propagacia)}</div></td><td><b>${fmtN(x.r.gsoInv)}</b></td></tr>`).join("")}
-      <tr><td><b>Spolu</b></td><td><b>${fmtN(T("gsoInv"))}</b></td></tr></table></div>`;
-    h += `<div class="card"><h3>${esc(g)} po nápojoch</h3>`;
-    list.forEach(d => { const r = rows.find(x => x.d === d).r;
-      h += `<div class="drink"><div class="name"><span>${esc(d.name)}</span>${r.missing ? "" : `<span class="num" style="color:${r.diff < 0 ? "var(--danger)" : r.diff > 0 ? "var(--warn)" : "var(--ok)"}">${r.diff ? fmtS(r.diff) : "sedí"}</span>`}</div>`;
-      if (r.missing) { h += `<div class="muted">Chýba počet v inventúre.</div></div>`; return; }
-      h += ln(`Inventúra ${fmtDs(A.date)}`, fmtN(r.open)) + ln("+ Príjem", fmtN(r.prod)) + outLines(r)
-        + ln("= Očakávaný stav", fmtS(r.exp), "sum") + ln(`Napočítané ${fmtDs(B.date)}`, fmtN(r.close))
-        + ln(r.diff < 0 ? "Manko" : r.diff > 0 ? "Prebytok" : "Rozdiel", fmtS(r.diff), r.diff < 0 ? "bad" : "key");
-      if (r.diff) h += `<input type="text" style="margin-top:6px" placeholder="Vysvetlenie rozdielu" value="${esc((B.notes || {})[d.id] || "")}" onchange="setNote('${B.id}','${d.id}',this.value)">`;
-      h += `</div>`; });
-    h += `</div>`;
-  });
+  h += `<div class="seg"><button class="${S.mTab === "sklad" ? "on" : ""}" onclick="S.mTab='sklad';renderMesiac()">Sklad</button>
+    ${hasGso ? `<button class="${S.mTab === "gso" ? "on" : ""}" onclick="S.mTab='gso';renderMesiac()">Faktúra GSO</button>` : ""}
+    <button class="${S.mTab === "ppp" ? "on" : ""}" onclick="S.mTab='ppp';renderMesiac()">Odberatelia PPP</button></div>`;
 
-  const cust = {};
-  sales.sh.filter(l => !l.gso && inP(l.d) && !drinkById(l.drinkId).hidden).forEach(l => { cust[l.c] = (cust[l.c] || 0) + l.q; });
-  const ce = Object.entries(cust).sort((a, b) => b[1] - a[1]);
-  h += `<div class="card"><h3>PPP (Shoptet), odberatelia</h3>` + (ce.length ? `<table>${ce.map(([c, n]) => `<tr><td>${esc(c)}</td><td>${fmtN(n)}</td></tr>`).join("")}</table>` : `<div class="empty">Žiadne.</div>`) + `</div>`;
-  const ga = S.data.outs.filter(g => inP(g.date)).sort((a, b) => a.date.localeCompare(b.date));
-  h += `<div class="card"><h3>Výdaje zadané ručne</h3>` + (ga.length ? `<table>${ga.map(g => `<tr><td>${esc(g.label)}<div class="muted">${OUT[g.type].label} · ${fmtDs(g.date)}</div></td><td>${fmtN(Object.values(g.items).reduce((s, n) => s + n, 0))}</td></tr>`).join("")}</table>` : `<div class="empty">Žiadne.</div>`) + `</div>`;
+  if (S.mTab === "sklad") {
+    h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>Očakávané</th><th>Napočítané</th><th>Rozdiel</th></tr>`;
+    rows.forEach(({ d, r }) => {
+      if (r.missing) { h += `<tr><td>${esc(d.name)}</td><td colspan="3" class="muted">chýba v inventúre</td></tr>`; return; }
+      const isOpen = S.mOpen === d.id, note = (B.notes || {})[d.id];
+      h += `<tr class="click" onclick="S.mOpen=${isOpen ? "null" : `'${d.id}'`};renderMesiac()"><td>${esc(d.name)}<span class="caret">${isOpen ? "▲" : "▼"}</span>${note ? `<div class="muted">${esc(note)}</div>` : ""}</td>
+        <td>${fmtS(r.exp)}</td><td>${fmtN(r.close)}</td><td class="${diffCls(r.diff)}">${r.diff ? fmtS(r.diff) : "0"}</td></tr>`;
+      if (isOpen) h += `<tr class="det"><td colspan="4">${ln(`Inventúra ${fmtDs(A.date)}`, fmtN(r.open))}${ln("+ Príjem", fmtN(r.prod))}${outLines(r)}
+        ${ln("= Očakávané", fmtS(r.exp), "sum")}
+        ${r.diff ? `<input type="text" style="margin-top:8px" placeholder="Vysvetlenie rozdielu" value="${esc(note || "")}" onclick="event.stopPropagation()" onchange="setNote('${B.id}','${d.id}',this.value)">` : ""}</td></tr>`;
+    });
+    h += `<tr class="sumr"><td>Spolu</td><td>${fmtS(T("exp"))}</td><td>${fmtN(T("close"))}</td><td class="${diffCls(diff)}">${diff ? fmtS(diff) : "0"}</td></tr></table>
+      <p class="muted" style="margin:10px 0 0">Ťuknutím na nápoj zobrazíš rozpis a doplníš vysvetlenie.</p></div>`;
+  } else if (S.mTab === "gso") {
+    const gr = ok.filter(x => x.r.gsoInv);
+    h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>Shopify</th><th>Mimo</th><th>Prop.</th><th>Spolu</th></tr>
+      ${gr.map(({ d, r }) => `<tr><td>${esc(d.name)}</td><td>${fmtN(r.shopify)}</td><td>${fmtN(r.mimo)}</td><td>${fmtN(r.propagacia)}</td><td><b>${fmtN(r.gsoInv)}</b></td></tr>`).join("")}
+      <tr class="sumr"><td>Spolu</td><td>${fmtN(T("shopify"))}</td><td>${fmtN(T("mimo"))}</td><td>${fmtN(T("propagacia"))}</td><td>${fmtN(T("gsoInv"))}</td></tr></table>
+      <button class="secondary block" onclick="copyGso()">Kopírovať do schránky</button></div>`;
+  } else {
+    const cust = {};
+    sales.sh.filter(l => !l.gso && inP(l.d) && list.some(d => d.id === l.drinkId)).forEach(l => { cust[l.c] = (cust[l.c] || 0) + l.q; });
+    const ce = Object.entries(cust).sort((a, b) => b[1] - a[1]);
+    h += `<div class="card">` + (ce.length ? `<table class="t"><tr><th>Odberateľ</th><th>Plechovky</th></tr>${ce.map(([c, n]) => `<tr><td>${esc(c)}</td><td>${fmtN(n)}</td></tr>`).join("")}
+      <tr class="sumr"><td>Spolu</td><td>${fmtN(T("ppp"))}</td></tr></table>` : `<div class="empty">V tomto období žiadne.</div>`) + `</div>`;
+  }
   el.innerHTML = h + syncInfo();
+}
+function copyGso(){
+  const I = counts(), A = I[S.period], B = I[S.period + 1], sales = salesFor();
+  const lines = drinks().map(d => ({ d, r:calc(A, B, d, sales) })).filter(x => !x.r.missing && x.r.gsoInv)
+    .map(x => `${x.d.name}\t${x.r.gsoInv}`);
+  const txt = `Faktúra GSO ${fmtD(A.date)} – ${fmtD(addDays(B.date, -1))}\n` + lines.join("\n");
+  navigator.clipboard.writeText(txt).then(() => toast("Skopírované"), () => toast("Kopírovanie sa nepodarilo"));
 }
 async function setNote(countId, drinkId, v){
   await mutate(() => { const c = S.data.counts.find(x => x.id === countId); c.notes = c.notes || {};
