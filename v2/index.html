@@ -174,7 +174,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v5.0";
+const APP_VERSION = "v5.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -190,7 +190,7 @@ const OUT = {
   odpis:     { label:"Odpis", field:"Dôvod", ph:"napr. rozbité pri vykládke", gso:false }
 };
 
-let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, invOpen:null };
+let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, invOpen:null, oSrc:"shoptet" };
 
 /* ---------- pomocné ---------- */
 const $ = id => document.getElementById(id);
@@ -561,7 +561,7 @@ function renderMesiac(){
   const rows = list.map(d => ({ d, r:calc(L[d.id], from, end) })), ok = rows.filter(x => !x.r.missing);
   const T = k => ok.reduce((s, x) => s + (x.r[k] || 0), 0);
   const hasGso = T("gsoInv") > 0;
-  if (S.mTab === "gso" && !hasGso) S.mTab = "sklad";
+  if ((S.mTab === "gso" && !hasGso) || S.mTab === "ppp") S.mTab = "sklad";
   const lastDay = fmtDs(addDays(end, -1)), counted = ok.some(x => x.r.adjs.length), adj = T("adj");
 
   let h = `<div class="title"><h2>Mesiac</h2></div>
@@ -577,7 +577,7 @@ function renderMesiac(){
 
   h += `<div class="seg"><button class="${S.mTab === "sklad" ? "on" : ""}" onclick="S.mTab='sklad';renderMesiac()">Sklad</button>
     ${hasGso ? `<button class="${S.mTab === "gso" ? "on" : ""}" onclick="S.mTab='gso';renderMesiac()">Faktúra GSO</button>` : ""}
-    <button class="${S.mTab === "ppp" ? "on" : ""}" onclick="S.mTab='ppp';renderMesiac()">Odberatelia PPP</button></div>`;
+    <button class="${S.mTab === "obj" ? "on" : ""}" onclick="S.mTab='obj';renderMesiac()">Objednávky</button></div>`;
 
   if (S.mTab === "sklad") {
     h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>${fmtDs(from)}</th><th>${running ? "Dnes" : lastDay}</th><th>Inventúra</th></tr>`;
@@ -599,13 +599,42 @@ function renderMesiac(){
       ${running ? `<p class="muted" style="margin:10px 0 0">Mesiac ešte prebieha, čísla sa budú meniť.</p>` : ""}
       <button class="secondary block" onclick="copyGso()">Kopírovať do schránky</button></div>`;
   } else {
-    const cust = {};
-    sales.sh.filter(l => !l.gso && inP(l.d) && list.some(d => d.id === l.drinkId)).forEach(l => { cust[l.c] = (cust[l.c] || 0) + l.q; });
-    const ce = Object.entries(cust).sort((a, b) => b[1] - a[1]);
-    h += `<div class="card">` + (ce.length ? `<table class="t"><tr><th>Odberateľ</th><th>Plechovky</th></tr>${ce.map(([c, n]) => `<tr><td>${esc(c)}</td><td>${fmtN(n)}</td></tr>`).join("")}
-      <tr class="sumr"><td>Spolu</td><td>${fmtN(T("ppp"))}</td></tr></table>` : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
+    h += renderOrders(list, inP, T);
   }
   el.innerHTML = h + syncInfo();
+}
+/* objednávky zo Shoptetu (PPP) a Shopify (GSO) v mesiaci, len nápoje zvolenej skupiny */
+function renderOrders(list, inP, T){
+  const ids = new Set(list.map(d => d.id)), name = id => drinkById(id)?.name || "?", byKey = {};
+  S.data.drinks.forEach(d => { byKey[norm(d.key)] = d.id; });
+  const add = (map, key, base, drinkId, q) => { const x = map[key] = map[key] || { ...base, items:{}, n:0 }; x.items[drinkId] = (x.items[drinkId] || 0) + q; x.n += q; };
+  let h = `<div class="chips">${[["shoptet","Shoptet (PPP)"],["shopify","Shopify (GSO)"],["odb","Odberatelia"]].map(([k, l]) =>
+    `<button class="${S.oSrc === k ? "on" : ""}" onclick="S.oSrc='${k}';renderMesiac()">${l}</button>`).join("")}</div>`;
+  const sh = {}, sf = {};
+  salesFor().sh.filter(l => ids.has(l.drinkId) && inP(l.d)).forEach(l => add(sh, l.o, { o:l.o, d:l.d, c:l.c, gso:l.gso }, l.drinkId, l.q));
+  ((S.sales || {}).shopifyOrders || []).forEach(l => { const id = byKey[norm(l.k)];
+    if (id && ids.has(id) && inP(l.d)) add(sf, l.o + l.d, { o:l.o, d:l.d, c:l.c, t:l.t, open:l.open }, id, l.q); });
+  const row = (x, sub, muted) => `<div class="entry"${muted ? ` style="opacity:.6"` : ""}><div class="l"><b>${esc(x.o)}</b> <span class="muted">${fmtDs(x.d)}</span>
+    <div class="muted">${sub}</div><div class="muted">${Object.entries(x.items).map(([id, n]) => `${esc(name(id))} ${fmtN(n)}`).join(", ")}</div></div>
+    <div class="r"><b class="num">${fmtN(x.n)}</b></div></div>`;
+  const sorted = m => Object.values(m).sort((a, b) => b.d.localeCompare(a.d) || b.o.localeCompare(a.o));
+  if (S.oSrc === "shoptet") {
+    const o = sorted(sh);
+    h += `<div class="card">` + (o.length ? o.map(x => row(x, x.gso ? "GSO, účtovný doklad (zo skladu sa neodpočítava)" : esc(x.c), x.gso)).join("")
+      : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
+  } else if (S.oSrc === "shopify") {
+    const o = sorted(sf);
+    h += `<div class="card">` + (o.length ? o.map(x => row(x, `${esc(x.t === "B2B" && x.c === "Súkromná osoba" ? "Firma bez názvu v Shopify" : x.c)} · ${x.t === "B2B" ? "B2B plechovky" : "B2C balíčky"}${x.open ? ` · <span style="color:var(--warn)">neoznačené ako odoslané</span>` : ""}`)).join("")
+      : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
+  } else {
+    const c = {};
+    Object.values(sh).filter(x => !x.gso).forEach(x => { const k = x.c; c[k] = c[k] || { n:0, src:new Set() }; c[k].n += x.n; c[k].src.add("Shoptet"); });
+    Object.values(sf).forEach(x => { const k = x.c; c[k] = c[k] || { n:0, src:new Set() }; c[k].n += x.n; c[k].src.add("Shopify"); });
+    const ce = Object.entries(c).sort((a, b) => b[1].n - a[1].n);
+    h += `<div class="card">` + (ce.length ? `<table class="t"><tr><th>Odberateľ</th><th>Plechovky</th></tr>${ce.map(([k, v]) =>
+      `<tr><td>${esc(k)}<div class="muted">${[...v.src].join(", ")}</div></td><td>${fmtN(v.n)}</td></tr>`).join("")}</table>` : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
+  }
+  return h;
 }
 function copyGso(){
   const from = S.month + "-01", to = nextMonth(S.month) + "-01", L = buildLedger();

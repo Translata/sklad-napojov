@@ -39,6 +39,7 @@ SITE_HOST, SITE_PATH = "translata.sharepoint.com", "/sites/liquidpositive"
 TARGET = "Sklad-app/predaje.json"
 GSO_NAME = re.compile(r"good\s*stuff\s*only", re.I)
 B2C_PRIVATE = "E-shop (súkromné osoby)"
+PRIVATE = "Súkromná osoba"
 
 SHOPIFY_QUERY = """
 query($q: String!, $after: String) {
@@ -46,6 +47,7 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       name createdAt cancelledAt
+      billingAddress { company }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
         nodes { id title currentQuantity variant { id } }
@@ -187,6 +189,7 @@ def shopify_lines(mapping, since):
     agg = defaultdict(int)
     unmapped = defaultdict(int)
     open_orders = []
+    per_order = defaultdict(int)
     n_orders = 0
     after = None
     while True:
@@ -209,6 +212,7 @@ def shopify_lines(mapping, since):
                 sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
             n_orders += 1
             day = local_day(o["createdAt"])
+            company = ((o.get("billingAddress") or {}).get("company") or "").strip() or PRIVATE
             # odoslané kusy podľa dátumu odoslania (fulfillment); zvyšok sa počíta k dátumu objednávky
             sent = defaultdict(list)
             for f in o["fulfillments"]:
@@ -235,9 +239,11 @@ def shopify_lines(mapping, since):
                 if left > 0:
                     parts.append((day, left))
                     open_cans += left * sum(cans.values())
-                for pd, pq in parts:
+                for i, (pd, pq) in enumerate(parts):
+                    unsent = left > 0 and i == len(parts) - 1
                     for name, n in cans.items():
                         agg[(pd, name, kind)] += n * pq
+                        per_order[(o["name"], pd, day, company, kind, name, unsent)] += n * pq
             if open_cans:
                 open_orders.append({"o": o["name"], "d": day, "q": open_cans})
         if not page["pageInfo"]["hasNextPage"]:
@@ -245,7 +251,9 @@ def shopify_lines(mapping, since):
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "q": q} for (d, k, t), q in sorted(agg.items()) if q]
-    return lines, dict(unmapped), n_orders, open_orders
+    orders = [{"o": o, "d": d, "od": od, "c": c, "t": t, "k": k, "q": q, **({"open": True} if u else {})}
+              for (o, d, od, c, t, k, u), q in sorted(per_order.items()) if q]
+    return lines, dict(unmapped), n_orders, open_orders, orders
 
 
 # ---------- SharePoint ----------
@@ -307,13 +315,14 @@ def main():
     ship_day = (now.date() - timedelta(days=1) if now.hour < 12 else now.date()).isoformat()
 
     sh_lines, sh_unmapped, sh_orders, shipped = shoptet_lines(mapping, a.since, shipped, ship_day)
-    sf_lines, sf_unmapped, sf_orders, sf_open = shopify_lines(mapping, a.since)
+    sf_lines, sf_unmapped, sf_orders, sf_open, sf_order_lines = shopify_lines(mapping, a.since)
     data = {
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "since": a.since,
         "shoptet": sh_lines,
         "shopify": sf_lines,
         "shopifyOpen": sf_open,
+        "shopifyOrders": sf_order_lines,
         "shoptetShipped": shipped,
         "unmapped": {"shoptet": sh_unmapped, "shopify": sf_unmapped},
     }
