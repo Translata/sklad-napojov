@@ -12,6 +12,9 @@ Premenné prostredia (lokálne v .env vedľa skriptu alebo v ../import/.env, na 
 
 Výpis neobsahuje mená zákazníkov ani odkazy (logy na GitHube sú verejné).
 
+Dátum pohybu = deň odoslania: Shopify podľa fulfillmentu (neodoslané kusy k dátumu objednávky, zoznam v shopifyOpen),
+Shoptet podľa dňa, keď sa objednávka prvýkrát objavila v stave Odoslaná (shoptetShipped, prenáša sa medzi behmi).
+
 Použitie:  python3 sync.py [--from 2026-07-01] [--out predaje.json] [--no-upload]
 """
 import argparse
@@ -26,7 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -45,7 +48,11 @@ query($q: String!, $after: String) {
       name createdAt cancelledAt
       lineItems(first: 50) {
         pageInfo { hasNextPage }
-        nodes { title currentQuantity variant { id } }
+        nodes { id title currentQuantity variant { id } }
+      }
+      fulfillments {
+        createdAt status
+        fulfillmentLineItems(first: 50) { nodes { quantity lineItem { id } } }
       }
     }
   }
@@ -90,9 +97,16 @@ def http(url, data=None, headers=None, method=None):
             time.sleep(10 * (attempt + 1))
 
 
+def local_day(ts):
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(TZ).date().isoformat()
+
+
 # ---------- Shoptet (PPP) ----------
 
-def shoptet_lines(mapping, since):
+def shoptet_lines(mapping, since, shipped, ship_day):
+    """shipped: {objednávka: dátum odoslania} z predchádzajúcich behov (None pri prvom behu).
+    Export nemá dátum expedície, preto sa za neho berie deň, kedy sa objednávka prvýkrát objavila
+    v stave Odoslaná (ship_day). Pri prvom behu sa pre staršie objednávky použije dátum objednávky."""
     raw = http(env("SHOPTET_EXPORT_URL"), headers={"User-Agent": "sklad-app-sync/1.0"})
     try:
         text = raw.decode("utf-8-sig")
@@ -111,6 +125,7 @@ def shoptet_lines(mapping, since):
     agg = defaultdict(float)
     unmapped = defaultdict(float)
     orders = set()
+    new_shipped = {}
     for r in rows:
         d = (r.get("date") or "")[:10]
         if d < since or r.get("orderItemType") != "product":
@@ -127,13 +142,16 @@ def shoptet_lines(mapping, since):
         company = (r.get("billCompany") or "").strip()
         gso = bool(GSO_NAME.search(company)) or (gso_ico and ico == gso_ico)
         customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else B2C_PRIVATE))
+        o = r["code"]
+        if o not in new_shipped:
+            new_shipped[o] = (shipped or {}).get(o) or (max(d, ship_day) if shipped is not None else d)
         for name, n in per_unit[code].items():
-            agg[(d, r["code"], customer, gso, name)] += qty * n
-        orders.add(r["code"])
+            agg[(new_shipped[o], d, o, customer, gso, name)] += qty * n
+        orders.add(o)
 
-    lines = [{"d": d, "o": o, "c": c, "gso": g, "k": k, "q": round(q)}
-             for (d, o, c, g, k), q in sorted(agg.items()) if round(q)]
-    return lines, dict(unmapped), len(orders)
+    lines = [{"d": sd, "od": od, "o": o, "c": c, "gso": g, "k": k, "q": round(q)}
+             for (sd, od, o, c, g, k), q in sorted(agg.items()) if round(q)]
+    return lines, dict(unmapped), len(orders), new_shipped
 
 
 # ---------- Shopify (GSO) ----------
@@ -168,6 +186,7 @@ def shopify_lines(mapping, since):
 
     agg = defaultdict(int)
     unmapped = defaultdict(int)
+    open_orders = []
     n_orders = 0
     after = None
     while True:
@@ -185,11 +204,19 @@ def shopify_lines(mapping, since):
         for o in page["nodes"]:
             if o["cancelledAt"]:
                 continue
-            if o["lineItems"]["pageInfo"]["hasNextPage"]:
+            if o["lineItems"]["pageInfo"]["hasNextPage"] or any(
+                    f["fulfillmentLineItems"].get("pageInfo", {}).get("hasNextPage") for f in o["fulfillments"]):
                 sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
             n_orders += 1
-            # dátum vytvorenia v miestnom čase
-            day = datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00")).astimezone(TZ).date().isoformat()
+            day = local_day(o["createdAt"])
+            # odoslané kusy podľa dátumu odoslania (fulfillment); zvyšok sa počíta k dátumu objednávky
+            sent = defaultdict(list)
+            for f in o["fulfillments"]:
+                if f["status"] != "SUCCESS":
+                    continue
+                for fl in f["fulfillmentLineItems"]["nodes"]:
+                    sent[fl["lineItem"]["id"]].append((local_day(f["createdAt"]), fl["quantity"]))
+            open_cans = 0
             for li in o["lineItems"]["nodes"]:
                 qty = li["currentQuantity"]  # už bez refundovaných a odobraných kusov
                 vid = (li["variant"] or {}).get("id")
@@ -199,29 +226,63 @@ def shopify_lines(mapping, since):
                     unmapped[li["title"][:60]] += qty
                     continue
                 cans, kind = variants[vid]
-                for name, n in cans.items():
-                    agg[(day, name, kind)] += n * qty
+                parts, left = [], qty
+                for sd, sq in sorted(sent.get(li["id"], [])):
+                    take = min(sq, left)
+                    if take > 0:
+                        parts.append((sd, take))
+                        left -= take
+                if left > 0:
+                    parts.append((day, left))
+                    open_cans += left * sum(cans.values())
+                for pd, pq in parts:
+                    for name, n in cans.items():
+                        agg[(pd, name, kind)] += n * pq
+            if open_cans:
+                open_orders.append({"o": o["name"], "d": day, "q": open_cans})
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "q": q} for (d, k, t), q in sorted(agg.items()) if q]
-    return lines, dict(unmapped), n_orders
+    return lines, dict(unmapped), n_orders, open_orders
 
 
 # ---------- SharePoint ----------
 
+_graph = {}
+
+
+def graph():
+    if not _graph:
+        body = urllib.parse.urlencode({
+            "client_id": env("GRAPH_CLIENT_ID"), "client_secret": env("GRAPH_CLIENT_SECRET"),
+            "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"}).encode()
+        tok = json.loads(http(f"https://login.microsoftonline.com/{env('GRAPH_TENANT_ID')}/oauth2/v2.0/token",
+                              data=body))["access_token"]
+        _graph["auth"] = {"Authorization": f"Bearer {tok}"}
+        site = json.loads(http(f"https://graph.microsoft.com/v1.0/sites/{SITE_HOST}:{SITE_PATH}",
+                               headers=_graph["auth"]))["id"]
+        _graph["url"] = f"https://graph.microsoft.com/v1.0/sites/{site}/drive/root:/{TARGET}:/content"
+    return _graph
+
+
+def download_previous():
+    g = graph()
+    req = urllib.request.Request(g["url"], headers=g["auth"])
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        sys.exit(f"HTTP {e.code} pri čítaní predchádzajúceho {TARGET}")
+
+
 def upload(data):
-    tenant = env("GRAPH_TENANT_ID")
-    body = urllib.parse.urlencode({
-        "client_id": env("GRAPH_CLIENT_ID"), "client_secret": env("GRAPH_CLIENT_SECRET"),
-        "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"}).encode()
-    tok = json.loads(http(f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token", data=body))["access_token"]
-    auth = {"Authorization": f"Bearer {tok}"}
-    site = json.loads(http(f"https://graph.microsoft.com/v1.0/sites/{SITE_HOST}:{SITE_PATH}", headers=auth))["id"]
-    http(f"https://graph.microsoft.com/v1.0/sites/{site}/drive/root:/{TARGET}:/content",
-         data=json.dumps(data, ensure_ascii=False).encode(), method="PUT",
-         headers={**auth, "Content-Type": "application/json"})
+    g = graph()
+    http(g["url"], data=json.dumps(data, ensure_ascii=False).encode(), method="PUT",
+         headers={**g["auth"], "Content-Type": "application/json"})
 
 
 def main():
@@ -233,13 +294,27 @@ def main():
     load_env()
     mapping = json.loads((HERE / "mapping.json").read_text())
 
-    sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
-    sf_lines, sf_unmapped, sf_orders = shopify_lines(mapping, a.since)
+    use_graph = not a.no_upload and bool(os.environ.get("GRAPH_CLIENT_SECRET"))
+    if use_graph:
+        prev = download_previous()
+    elif a.out and Path(a.out).exists():
+        prev = json.loads(Path(a.out).read_text())
+    else:
+        prev = None
+    shipped = (prev or {}).get("shoptetShipped")
+    # nočný beh (pred poludním) zachytí objednávky odoslané včera
+    now = datetime.now(TZ)
+    ship_day = (now.date() - timedelta(days=1) if now.hour < 12 else now.date()).isoformat()
+
+    sh_lines, sh_unmapped, sh_orders, shipped = shoptet_lines(mapping, a.since, shipped, ship_day)
+    sf_lines, sf_unmapped, sf_orders, sf_open = shopify_lines(mapping, a.since)
     data = {
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "since": a.since,
         "shoptet": sh_lines,
         "shopify": sf_lines,
+        "shopifyOpen": sf_open,
+        "shoptetShipped": shipped,
         "unmapped": {"shoptet": sh_unmapped, "shopify": sf_unmapped},
     }
 
@@ -247,15 +322,14 @@ def main():
     direct = sum(l["q"] for l in sh_lines if not l["gso"])
     print(f"Od {a.since}: Shoptet {sh_orders} objednávok (GSO {gso} ks, priamo {direct} ks), "
           f"Shopify {sf_orders} objednávok ({sum(l['q'] for l in sf_lines)} ks)")
+    print(f"Shopify neoznačené ako odoslané: {len(sf_open)} objednávok ({sum(x['q'] for x in sf_open)} ks)")
     print(f"Nesledované položky: Shoptet {len(sh_unmapped)}, Shopify {len(sf_unmapped)}")
 
     if a.out:
         Path(a.out).write_text(json.dumps(data, ensure_ascii=False, indent=1))
         print("Uložené lokálne:", a.out)
-    if a.no_upload:
-        return
-    if not os.environ.get("GRAPH_CLIENT_SECRET"):
-        print("GRAPH_* nie sú nastavené, na SharePoint sa nezapisuje.")
+    if not use_graph:
+        print("Na SharePoint sa nezapisuje.")
         return
     upload(data)
     print("Zapísané na SharePoint:", TARGET)
