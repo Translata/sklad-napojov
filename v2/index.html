@@ -164,17 +164,17 @@
 <div class="toast" id="toast"></div>
 
 <script>
-/* Sklad nápojov v4: komisionálny sklad.
+/* Sklad nápojov v5: komisionálny sklad s priebežnou evidenciou.
    Tovar patrí PPP, kým ho nepredá PPP (Shoptet) alebo GSO (Shopify, predaj mimo Shopify) alebo kým sa nerozdá či neodpíše.
-   Každý výdaj má doklad, nič sa nedopočítava. Dátum pohybu = deň odoslania.
-   Za obdobie medzi inventúrami A a B (A.dátum <= dátum < B.dátum):
-     očakávaný stav = stav A + príjem - PPP - Shopify - predaj mimo Shopify - propagácia - odpisy
-     rozdiel = napočítané v B - očakávaný stav  (záporný = manko, kladný = prebytok)
-     faktúra GSO = Shopify + predaj mimo Shopify + propagácia
-   Ručne sa zadáva: príjem, výdaj (propagácia, predaj mimo Shopify, odpis), inventúra.
+   Každý výdaj má doklad. Dátum pohybu = deň odoslania.
+   Stav nápoja = počiatočný stav (prvá inventúra, v ktorej je nápoj) + príjmy − výdaje + inventúrne rozdiely.
+   Inventúra je kontrola: počíta sa na začiatku dňa D, rozdiel = napočítané − evidovaný stav pred dňom D
+   a zapíše sa ako pohyb s dátumom D − 1 (patrí ešte do predchádzajúceho dňa). Inventúra môže byť aj čiastočná.
+   Rozdiely sa prepočítavajú pri každej zmene údajov, takže dodatočne zadaný príjem rozdiel opraví.
+   Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v4.1";
+const APP_VERSION = "v5.0";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -190,7 +190,7 @@ const OUT = {
   odpis:     { label:"Odpis", field:"Dôvod", ph:"napr. rozbité pri vykládke", gso:false }
 };
 
-let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null };
+let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, invOpen:null };
 
 /* ---------- pomocné ---------- */
 const $ = id => document.getElementById(id);
@@ -229,33 +229,59 @@ function salesFor(){
   return { sh, sf };
 }
 
-/* ---------- výpočet za obdobie [A, B) pre jeden nápoj; B = null je bežiace obdobie ---------- */
-function calc(A, B, d, sales){
-  const inP = x => x >= A.date && (!B || x < B.date);
-  const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
-  const r = { open: A.counts[d.id] ?? null };
-  r.prod = sum(S.data.receipts, x => x.drinkId === d.id && inP(x.date) ? x.qty : 0);
-  Object.keys(OUT).forEach(t => { r[t] = sum(S.data.outs, x => x.type === t && inP(x.date) ? (x.items[d.id] || 0) : 0); });
-  r.ppp = sum(sales.sh, x => x.drinkId === d.id && !x.gso && inP(x.d) ? x.q : 0);
-  r.b2c = sum(sales.sf, x => x.drinkId === d.id && x.t === "B2C" && inP(x.d) ? x.q : 0);
-  r.b2b = sum(sales.sf, x => x.drinkId === d.id && x.t === "B2B" && inP(x.d) ? x.q : 0);
-  r.shopify = r.b2c + r.b2b;
+/* ---------- kniha pohybov po nápojoch ---------- */
+const MONTHS = ["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+const monthName = ym => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+const nextMonth = ym => { let [y, m] = ym.split("-").map(Number); m++; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, "0")}`; };
+function buildLedger(){
+  const sales = salesFor(), C = counts(), L = {};
+  S.data.drinks.forEach(d => {
+    const mv = [];
+    S.data.receipts.forEach(r => { if (r.drinkId === d.id) mv.push({ date:r.date, k:"prod", q:r.qty }); });
+    S.data.outs.forEach(o => { if (o.items[d.id]) mv.push({ date:o.date, k:o.type, q:-o.items[d.id] }); });
+    sales.sh.forEach(x => { if (x.drinkId === d.id && !x.gso) mv.push({ date:x.d, k:"ppp", q:-x.q }); });
+    sales.sf.forEach(x => { if (x.drinkId === d.id) mv.push({ date:x.d, k:x.t === "B2C" ? "b2c" : "b2b", q:-x.q }); });
+    const first = C.find(c => c.counts[d.id] != null);
+    if (!first) { L[d.id] = { start:null, mv:[], adj:[] }; return; }
+    const start = { date:first.date, qty:first.counts[d.id], countId:first.id };
+    const m = mv.filter(x => x.date >= start.date), adj = [];
+    C.filter(c => c.date > start.date && c.counts[d.id] != null).forEach(c => {
+      const book = start.qty + m.reduce((s, x) => s + (x.date < c.date ? x.q : 0), 0) + adj.reduce((s, a) => s + a.diff, 0);
+      adj.push({ date:addDays(c.date, -1), countDate:c.date, countId:c.id, counted:c.counts[d.id], book, diff:c.counts[d.id] - book, note:(c.notes || {})[d.id] || "" });
+    });
+    L[d.id] = { start, mv:m, adj };
+  });
+  return L;
+}
+/* evidovaný stav na začiatku dňa X (pohyby s dátumom < X) */
+function bookAt(l, X){
+  if (!l.start || X < l.start.date) return null;
+  return l.start.qty + l.mv.reduce((s, x) => s + (x.date < X ? x.q : 0), 0) + l.adj.reduce((s, a) => s + (a.date < X ? a.diff : 0), 0);
+}
+/* pohyby nápoja v období [from, to) */
+function calc(l, from, to){
+  const r = { missing:!l.start || to <= l.start.date };
+  if (r.missing) return r;
+  r.from = from < l.start.date ? l.start.date : from; r.started = r.from !== from;
+  const inP = x => x >= r.from && x < to, sum = k => -l.mv.reduce((s, x) => s + (x.k === k && inP(x.date) ? x.q : 0), 0);
+  r.open = bookAt(l, r.from); r.prod = -sum("prod");
+  r.ppp = sum("ppp"); r.b2c = sum("b2c"); r.b2b = sum("b2b"); r.shopify = r.b2c + r.b2b;
+  Object.keys(OUT).forEach(t => { r[t] = sum(t); });
   r.gsoInv = r.shopify + r.mimo + r.propagacia;
   r.out = r.ppp + r.gsoInv + r.odpis;
-  if (r.open === null) { r.missing = true; return r; }
-  r.exp = r.open + r.prod - r.out;
-  if (B) {
-    r.close = B.counts[d.id] ?? null;
-    if (r.close === null) { r.missing = true; return r; }
-    r.diff = r.close - r.exp;
-  }
+  r.adjs = l.adj.filter(a => inP(a.date)); r.adj = r.adjs.reduce((s, a) => s + a.diff, 0);
+  r.close = bookAt(l, to);
   return r;
 }
+const diffCls = n => n < 0 ? "bad" : n > 0 ? "warn" : "ok";
+const diffWord = n => n < 0 ? "Manko" : n > 0 ? "Prebytok" : "Sedí";
+
 /* riadky rozpisu výdajov pre jeden nápoj */
 function outLines(r){
   return [["− PPP (Shoptet)", r.ppp], ["− GSO Shopify balíčky", r.b2c], ["− GSO Shopify plechovky", r.b2b],
     ["− GSO predaj mimo Shopify", r.mimo], ["− Propagácia (GSO)", r.propagacia], ["− Odpisy", r.odpis]]
-    .filter(([, n]) => n).map(([l, n]) => ln(l, fmtN(n))).join("");
+    .filter(([, n]) => n).map(([l, n]) => ln(l, fmtN(n))).join("")
+    + (r.adjs || []).filter(a => a.diff).map(a => ln(`${a.diff < 0 ? "−" : "+"} Inventúra ${fmtDs(a.countDate)}${a.note ? ` (${esc(a.note)})` : ""}`, fmtN(Math.abs(a.diff)), a.diff < 0 ? "bad" : "")).join("");
 }
 
 /* ---------- úložisko ---------- */
@@ -360,22 +386,21 @@ function onboarding(){
 function renderStav(){
   const el = $("screen-stav");
   if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
-  const I = counts();
-  if (!I.length) { el.innerHTML = `<div class="card empty">Stav sa ukáže po prvej inventúre.</div>`; return; }
-  const A = I[I.length - 1], sales = salesFor();
-  let h = `<div class="title"><h2>Stav skladu</h2><span class="muted">k dnešku</span></div>`;
+  if (!S.data.counts.length) { el.innerHTML = `<div class="card empty">Zadaj počiatočnú inventúru. Od nej sa začne počítať stav.</div>`; return; }
+  const L = buildLedger(), today = todayISO(), tomorrow = addDays(today, 1), ms = today.slice(0, 8) + "01";
+  let h = `<div class="title"><h2>Stav skladu</h2><span class="muted">${fmtD(today)}</span></div>`;
   groups(drinks()).forEach(([g, list]) => {
     h += `<div class="card"><h3>${esc(g)}</h3>`;
     list.forEach(d => {
-      const r = calc(A, null, d, sales), open = S.open[d.id];
+      const r = calc(L[d.id], ms, tomorrow), open = S.open[d.id];
       h += `<div class="stock" onclick="S.open['${d.id}']=!S.open['${d.id}'];renderStav()"><span>${esc(d.name)}</span>
-        <span class="n num ${r.exp < 0 ? "neg" : ""}">${r.missing ? "–" : fmtS(r.exp)}</span></div>`;
-      if (open && !r.missing) h += `<div class="detail">${ln(`Inventúra ${fmtDs(A.date)}`, fmtN(r.open))}${ln("+ Príjem", fmtN(r.prod))}
-        ${outLines(r)}${ln("= Stav", fmtS(r.exp), "sum")}</div>`;
+        <span class="n num ${r.close < 0 ? "neg" : ""}">${r.missing ? "–" : fmtS(r.close)}</span></div>`;
+      if (open && !r.missing) h += `<div class="detail">${ln(`${r.started ? "Počiatočný stav" : "Stav"} ${fmtDs(r.from)}`, fmtN(r.open))}${r.prod ? ln("+ Príjem", fmtN(r.prod)) : ""}
+        ${outLines(r)}${ln("= Stav dnes", fmtS(r.close), "sum")}</div>`;
     });
     h += `</div>`;
   });
-  h += `<p class="muted" style="margin:0 4px;">Od inventúry ${fmtD(A.date)}. Ťuknutím na nápoj zobrazíš rozpis.</p>`;
+  h += `<p class="muted" style="margin:0 4px;">Ťuknutím na nápoj zobrazíš pohyby od začiatku mesiaca.</p>`;
   el.innerHTML = h + syncInfo();
 }
 
@@ -389,12 +414,12 @@ function qtyList(prefix, values = {}){
   });
   return h + `</div><div class="total"><span>Spolu</span><span class="num" id="${prefix}-total">0</span></div>`;
 }
-function qtyRead(prefix, required){
+function qtyRead(prefix, required, keepZero){
   const out = {}; let bad = false;
   drinks().forEach(d => { const v = $(`${prefix}-${d.id}`).value.trim();
     if (v === "") { if (required) bad = true; return; }
     const n = Math.round(Number(v)); if (!Number.isFinite(n) || n < 0) { bad = true; return; }
-    if (n > 0 || required) out[d.id] = n; });
+    if (n > 0 || required || keepZero) out[d.id] = n; });
   return bad ? null : out;
 }
 function qtyTotal(prefix){ let t = 0; drinks().forEach(d => { t += Number($(`${prefix}-${d.id}`).value) || 0; }); $(`${prefix}-total`).textContent = fmtN(t); }
@@ -466,16 +491,26 @@ async function delVydaj(id){
 function renderInventura(){
   const el = $("screen-inventura");
   if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
-  const I = counts();
+  const I = counts(), L = buildLedger(), first = !I.length;
   let h = `<div class="title"><h2>Inventúra</h2></div>
     <div class="card"><label for="i-date" style="margin-top:0">Dátum</label><input type="date" id="i-date" value="${todayISO()}">
-    <p class="muted">Napočítaj stav na začiatku dňa. Príjmy a predaje z dňa inventúry patria už do nového obdobia. Vyplň všetky nápoje, aj nuly.</p>
+    <p class="muted">${first ? "Počiatočná inventúra: vyplň všetky nápoje, aj nuly. Od nej sa začne počítať stav."
+      : "Napočítaj stav na začiatku dňa, pred dnešnými príjmami a expedíciou. Stačí vyplniť len nápoje, ktoré kontroluješ; prázdne sa nezapočítajú, nula áno."}</p>
     ${qtyList("i")}<button class="block" onclick="saveInventura()">Uložiť inventúru</button></div>`;
   h += countDayOrders();
-  h += `<div class="card"><h3>Inventúry</h3>` + (I.length ? [...I].reverse().map((c, i) => `<div class="entry"><div class="l"><b>${fmtD(c.date)}</b>
-      <div class="muted">${c.by ? esc(c.by) : ""}</div></div><div class="r"><b class="num">${fmtN(Object.values(c.counts).reduce((s, n) => s + n, 0))}</b><br>
-      ${i === 0 ? `<button class="del" onclick="delInventura('${c.id}')">Zmazať</button>` : ""}</div></div>`).join("")
-    : `<div class="empty">Zatiaľ žiadna inventúra.</div>`) + `</div>`;
+  h += `<div class="card"><h3>Inventúry</h3>` + (I.length ? [...I].reverse().map(c => {
+    const rows = S.data.drinks.filter(d => c.counts[d.id] != null).map(d => ({ d, a:L[d.id].adj.find(a => a.countId === c.id) }));
+    const isStart = rows.every(x => !x.a), tot = rows.reduce((s, x) => s + (x.a ? x.a.diff : 0), 0), open = S.invOpen === c.id;
+    let e = `<div class="entry" style="cursor:pointer" onclick="S.invOpen=${open ? "null" : `'${c.id}'`};renderInventura()"><div class="l"><b>${fmtD(c.date)}</b><span class="caret">${open ? "▲" : "▼"}</span>
+      <div class="muted">${isStart ? "počiatočný stav" : `${rows.length} ${rows.length === 1 ? "nápoj" : rows.length < 5 ? "nápoje" : "nápojov"}`}${c.by ? " · " + esc(c.by) : ""}</div></div>
+      <div class="r">${isStart ? "" : `<b class="num" style="color:var(--${tot < 0 ? "danger" : tot > 0 ? "warn" : "ok"})">${tot ? `${diffWord(tot)} ${fmtN(Math.abs(tot))}` : "Sedí"}</b>`}</div></div>`;
+    if (open) {
+      e += `<table class="t" style="margin:4px 0 10px"><tr><th>Nápoj</th><th>Evidované</th><th>Napočítané</th><th>Rozdiel</th></tr>` + rows.map(({ d, a }) =>
+        `<tr><td>${esc(d.name)}</td><td>${a ? fmtS(a.book) : "–"}</td><td>${fmtN(c.counts[d.id])}</td><td class="${a ? diffCls(a.diff) : ""}">${a ? (a.diff ? fmtS(a.diff) : "0") : "–"}</td></tr>`
+        + (a && a.diff ? `<tr class="det"><td colspan="4"><input type="text" placeholder="Vysvetlenie rozdielu ${esc(d.name)}" value="${esc(a.note)}" onchange="setNote('${c.id}','${d.id}',this.value)"></td></tr>` : "")).join("")
+        + `</table><button class="del" onclick="delInventura('${c.id}')">Zmazať inventúru</button>`;
+    }
+    return e; }).join("") : `<div class="empty">Zatiaľ žiadna inventúra.</div>`) + `</div>`;
   el.innerHTML = h; qtyTotal("i");
 }
 /* priame objednávky zo Shoptetu s dátumom inventúry: treba určiť, či odišli pred počítaním */
@@ -487,20 +522,22 @@ function countDayOrders(){
   const list = Object.values(o).sort((a, b) => b.d.localeCompare(a.d) || a.o.localeCompare(b.o));
   if (!list.length) return "";
   return `<div class="card"><h3>Objednávky zo Shoptetu z dňa inventúry</h3>
-    <p class="muted" style="margin-top:0">Označ tie, ktoré odišli zo skladu ešte pred počítaním. Inak sa odpočítajú až v novom období.</p>` +
+    <p class="muted" style="margin-top:0">Označ tie, ktoré odišli zo skladu ešte pred počítaním. Inak sa odpočítajú až po inventúre.</p>` +
     list.map(x => `<div class="entry"><div class="l"><b>${esc(x.o)}</b> · ${fmtD(x.d)}<div class="muted">${esc(x.c)} · ${esc(x.items.join(", "))}</div>
       <label style="margin:6px 0 0;color:var(--text);font-size:14px"><input type="checkbox" ${S.data.beforeCount[x.o] ? "checked" : ""} onchange="setBefore('${esc(x.o)}',this.checked)"> Odišla pred počítaním</label></div>
       <div class="r"><b class="num">${fmtN(x.n)}</b></div></div>`).join("") + `</div>`;
 }
 async function setBefore(o, v){ await mutate(() => { if (v) S.data.beforeCount[o] = true; else delete S.data.beforeCount[o]; }, "Uložené"); }
 async function saveInventura(){
-  const date = $("i-date").value, c = qtyRead("i", true);
+  const date = $("i-date").value, first = !S.data.counts.length, c = qtyRead("i", first, true);
   if (!date) return toast("Zadaj dátum");
-  if (!c) return toast("Vyplň počet pri každom nápoji (aj 0)");
+  if (!c) return toast(first ? "Vyplň počet pri každom nápoji (aj 0)" : "Skontroluj zadané počty");
+  if (!Object.keys(c).length) return toast("Zadaj aspoň jeden počet");
   if (S.data.counts.some(x => x.date === date)) return toast("Inventúra s týmto dátumom už existuje");
-  const last = counts().slice(-1)[0];
-  if (last && date < last.date) return toast("Dátum je pred poslednou inventúrou");
-  if (await mutate(() => S.data.counts.push({ id:uid(), date, counts:c, ...stamp() }), "Inventúra uložená")) { S.period = null; go("mesiac"); }
+  const start = counts()[0];
+  if (start && date < start.date) return toast("Dátum je pred počiatočnou inventúrou");
+  const id = uid();
+  if (await mutate(() => S.data.counts.push({ id, date, counts:c, ...stamp() }), "Inventúra uložená")) { S.invOpen = id; renderInventura(); window.scrollTo(0, document.body.scrollHeight); }
 }
 async function delInventura(id){
   const c = S.data.counts.find(x => x.id === id);
@@ -508,33 +545,33 @@ async function delInventura(id){
   await mutate(() => { S.data.counts = S.data.counts.filter(x => x.id !== id); }, "Inventúra zmazaná");
 }
 
-/* ---------- MESIAC ---------- */
-const diffCls = n => n < 0 ? "bad" : n > 0 ? "warn" : "ok";
-const diffWord = n => n < 0 ? "Manko" : n > 0 ? "Prebytok" : "Sedí";
+/* ---------- MESIAC (kalendárny) ---------- */
 function renderMesiac(){
   const el = $("screen-mesiac");
   if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
   const I = counts();
-  if (I.length < 2) { el.innerHTML = `<div class="title"><h2>Mesiac</h2></div><div class="card empty">Rozpis sa ukáže po druhej inventúre.</div>`; return; }
-  const P = []; for (let i = 1; i < I.length; i++) P.push([I[i-1], I[i]]);
-  if (S.period === null || S.period >= P.length) S.period = P.length - 1;
-  const [A, B] = P[S.period], sales = salesFor(), inP = x => x >= A.date && x < B.date;
+  if (!I.length) { el.innerHTML = `<div class="title"><h2>Mesiac</h2></div><div class="card empty">Prehľad sa ukáže po počiatočnej inventúre.</div>`; return; }
+  const cur = todayISO().slice(0, 7), M = [];
+  for (let m = I[0].date.slice(0, 7); m <= cur; m = nextMonth(m)) M.push(m);
+  if (!S.month || !M.includes(S.month)) S.month = M.length > 1 ? M[M.length - 2] : cur;
+  const from = S.month + "-01", to = nextMonth(S.month) + "-01", running = S.month === cur, end = running ? addDays(todayISO(), 1) : to;
+  const L = buildLedger(), sales = salesFor(), inP = x => x >= from && x < end;
   const G = groups(drinks()); if (!G.some(([g]) => g === S.mGroup)) S.mGroup = G[0][0];
   const list = G.find(([g]) => g === S.mGroup)[1];
-  const rows = list.map(d => ({ d, r:calc(A, B, d, sales) })), ok = rows.filter(x => !x.r.missing);
+  const rows = list.map(d => ({ d, r:calc(L[d.id], from, end) })), ok = rows.filter(x => !x.r.missing);
   const T = k => ok.reduce((s, x) => s + (x.r[k] || 0), 0);
   const hasGso = T("gsoInv") > 0;
   if (S.mTab === "gso" && !hasGso) S.mTab = "sklad";
+  const lastDay = fmtDs(addDays(end, -1)), counted = ok.some(x => x.r.adjs.length), adj = T("adj");
 
   let h = `<div class="title"><h2>Mesiac</h2></div>
-    <div class="chips">${P.map(([a, b], i) => `<button class="${i === S.period ? "on" : ""}" onclick="S.period=${i};S.mOpen=null;renderMesiac()">${fmtDs(a.date)} – ${fmtDs(addDays(b.date, -1))}</button>`).reverse().join("")}</div>`;
+    <div class="chips">${M.map(m => `<button class="${m === S.month ? "on" : ""}" onclick="S.month='${m}';S.mOpen=null;renderMesiac()">${monthName(m)}${m === cur ? " (priebežne)" : ""}</button>`).reverse().join("")}</div>`;
   if (G.length > 1) h += `<div class="seg">${G.map(([g]) => `<button class="${g === S.mGroup ? "on" : ""}" onclick="S.mGroup='${esc(g)}';S.mOpen=null;renderMesiac()">${esc(g)}</button>`).join("")}</div>`;
 
-  // výsledok obdobia
-  const diff = T("diff");
-  h += `<div class="card"><div class="muted">Výsledok inventúry ${fmtDs(B.date)}</div>
-    <div class="big num ${diffCls(diff)}">${diff ? `${diffWord(diff)} ${fmtN(Math.abs(diff))} ks` : "Všetko sedí"}</div>
-    <div class="flow">Príjem ${fmtN(T("prod"))} · PPP ${fmtN(T("ppp"))}${hasGso ? ` · GSO ${fmtN(T("gsoInv"))}` : ""} · odpisy ${fmtN(T("odpis"))}</div></div>`;
+  const startLbl = ok.length && ok.every(x => x.r.started) ? `Počiatočný stav ${fmtDs(ok[0].r.from)}` : `Stav ${fmtDs(from)}`;
+  h += `<div class="card"><div class="muted">${startLbl} ${fmtN(T("open"))} → ${running ? "dnes" : lastDay} <b style="color:var(--text)">${fmtN(T("close"))}</b></div>
+    <div class="big num ${counted ? diffCls(adj) : ""}" style="${counted ? "" : "color:var(--muted)"}">${counted ? (adj ? `${diffWord(adj)} ${fmtN(Math.abs(adj))} ks` : "Inventúra sedí") : "Bez inventúry"}</div>
+    <div class="flow">Príjem ${fmtN(T("prod"))} · PPP ${fmtN(T("ppp"))}${hasGso ? ` · GSO ${fmtN(T("gsoInv"))}` : ""}${T("odpis") ? ` · odpisy ${fmtN(T("odpis"))}` : ""}</div></div>`;
   const open = ((S.sales || {}).shopifyOpen || []).filter(o => inP(o.d));
   if (open.length && hasGso) h += `<div class="note">${open.length} ${open.length === 1 ? "objednávka" : "objednávky"} v Shopify bez označenia odoslané (${fmtN(open.reduce((s, o) => s + o.q, 0))} ks): ${open.map(o => esc(o.o)).join(", ")}. Počítajú sa ku dňu objednávky.</div>`;
 
@@ -543,39 +580,37 @@ function renderMesiac(){
     <button class="${S.mTab === "ppp" ? "on" : ""}" onclick="S.mTab='ppp';renderMesiac()">Odberatelia PPP</button></div>`;
 
   if (S.mTab === "sklad") {
-    h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>Očakávané</th><th>Napočítané</th><th>Rozdiel</th></tr>`;
+    h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>${fmtDs(from)}</th><th>${running ? "Dnes" : lastDay}</th><th>Inventúra</th></tr>`;
     rows.forEach(({ d, r }) => {
-      if (r.missing) { h += `<tr><td>${esc(d.name)}</td><td colspan="3" class="muted">chýba v inventúre</td></tr>`; return; }
-      const isOpen = S.mOpen === d.id, note = (B.notes || {})[d.id];
-      h += `<tr class="click" onclick="S.mOpen=${isOpen ? "null" : `'${d.id}'`};renderMesiac()"><td>${esc(d.name)}<span class="caret">${isOpen ? "▲" : "▼"}</span>${note ? `<div class="muted">${esc(note)}</div>` : ""}</td>
-        <td>${fmtS(r.exp)}</td><td>${fmtN(r.close)}</td><td class="${diffCls(r.diff)}">${r.diff ? fmtS(r.diff) : "0"}</td></tr>`;
-      if (isOpen) h += `<tr class="det"><td colspan="4">${ln(`Inventúra ${fmtDs(A.date)}`, fmtN(r.open))}${ln("+ Príjem", fmtN(r.prod))}${outLines(r)}
-        ${ln("= Očakávané", fmtS(r.exp), "sum")}
-        ${r.diff ? `<input type="text" style="margin-top:8px" placeholder="Vysvetlenie rozdielu" value="${esc(note || "")}" onclick="event.stopPropagation()" onchange="setNote('${B.id}','${d.id}',this.value)">` : ""}</td></tr>`;
+      if (r.missing) { h += `<tr><td>${esc(d.name)}</td><td colspan="3" class="muted">bez počiatočnej inventúry</td></tr>`; return; }
+      const isOpen = S.mOpen === d.id;
+      h += `<tr class="click" onclick="S.mOpen=${isOpen ? "null" : `'${d.id}'`};renderMesiac()"><td>${esc(d.name)}<span class="caret">${isOpen ? "▲" : "▼"}</span></td>
+        <td>${fmtN(r.open)}</td><td>${fmtS(r.close)}</td><td class="${r.adjs.length ? diffCls(r.adj) : ""}">${r.adjs.length ? (r.adj ? fmtS(r.adj) : "0") : "–"}</td></tr>`;
+      if (isOpen) h += `<tr class="det"><td colspan="4">${ln(`${r.started ? "Počiatočný stav" : "Stav"} ${fmtDs(r.from)}`, fmtN(r.open))}${r.prod ? ln("+ Príjem", fmtN(r.prod)) : ""}${outLines(r)}
+        ${ln(`= Stav ${running ? "dnes" : lastDay}`, fmtS(r.close), "sum")}</td></tr>`;
     });
-    h += `<tr class="sumr"><td>Spolu</td><td>${fmtS(T("exp"))}</td><td>${fmtN(T("close"))}</td><td class="${diffCls(diff)}">${diff ? fmtS(diff) : "0"}</td></tr></table>
-      <p class="muted" style="margin:10px 0 0">Ťuknutím na nápoj zobrazíš rozpis a doplníš vysvetlenie.</p></div>`;
+    h += `<tr class="sumr"><td>Spolu</td><td>${fmtN(T("open"))}</td><td>${fmtS(T("close"))}</td><td class="${counted ? diffCls(adj) : ""}">${counted ? (adj ? fmtS(adj) : "0") : "–"}</td></tr></table>
+      <p class="muted" style="margin:10px 0 0">Ťuknutím na nápoj zobrazíš pohyby. Rozdiely vysvetľuješ na obrazovke Inventúra.</p></div>`;
   } else if (S.mTab === "gso") {
     const gr = ok.filter(x => x.r.gsoInv);
     h += `<div class="card"><table class="t"><tr><th>Nápoj</th><th>Shopify</th><th>Mimo</th><th>Prop.</th><th>Spolu</th></tr>
       ${gr.map(({ d, r }) => `<tr><td>${esc(d.name)}</td><td>${fmtN(r.shopify)}</td><td>${fmtN(r.mimo)}</td><td>${fmtN(r.propagacia)}</td><td><b>${fmtN(r.gsoInv)}</b></td></tr>`).join("")}
       <tr class="sumr"><td>Spolu</td><td>${fmtN(T("shopify"))}</td><td>${fmtN(T("mimo"))}</td><td>${fmtN(T("propagacia"))}</td><td>${fmtN(T("gsoInv"))}</td></tr></table>
+      ${running ? `<p class="muted" style="margin:10px 0 0">Mesiac ešte prebieha, čísla sa budú meniť.</p>` : ""}
       <button class="secondary block" onclick="copyGso()">Kopírovať do schránky</button></div>`;
   } else {
     const cust = {};
     sales.sh.filter(l => !l.gso && inP(l.d) && list.some(d => d.id === l.drinkId)).forEach(l => { cust[l.c] = (cust[l.c] || 0) + l.q; });
     const ce = Object.entries(cust).sort((a, b) => b[1] - a[1]);
     h += `<div class="card">` + (ce.length ? `<table class="t"><tr><th>Odberateľ</th><th>Plechovky</th></tr>${ce.map(([c, n]) => `<tr><td>${esc(c)}</td><td>${fmtN(n)}</td></tr>`).join("")}
-      <tr class="sumr"><td>Spolu</td><td>${fmtN(T("ppp"))}</td></tr></table>` : `<div class="empty">V tomto období žiadne.</div>`) + `</div>`;
+      <tr class="sumr"><td>Spolu</td><td>${fmtN(T("ppp"))}</td></tr></table>` : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
   }
   el.innerHTML = h + syncInfo();
 }
 function copyGso(){
-  const I = counts(), A = I[S.period], B = I[S.period + 1], sales = salesFor();
-  const lines = drinks().map(d => ({ d, r:calc(A, B, d, sales) })).filter(x => !x.r.missing && x.r.gsoInv)
-    .map(x => `${x.d.name}\t${x.r.gsoInv}`);
-  const txt = `Faktúra GSO ${fmtD(A.date)} – ${fmtD(addDays(B.date, -1))}\n` + lines.join("\n");
-  navigator.clipboard.writeText(txt).then(() => toast("Skopírované"), () => toast("Kopírovanie sa nepodarilo"));
+  const from = S.month + "-01", to = nextMonth(S.month) + "-01", L = buildLedger();
+  const lines = drinks().map(d => ({ d, r:calc(L[d.id], from, to) })).filter(x => !x.r.missing && x.r.gsoInv).map(x => `${x.d.name}\t${x.r.gsoInv}`);
+  navigator.clipboard.writeText(`Faktúra GSO ${monthName(S.month)}\n` + lines.join("\n")).then(() => toast("Skopírované"), () => toast("Kopírovanie sa nepodarilo"));
 }
 async function setNote(countId, drinkId, v){
   await mutate(() => { const c = S.data.counts.find(x => x.id === countId); c.notes = c.notes || {};
