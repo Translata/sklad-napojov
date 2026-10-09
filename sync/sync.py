@@ -47,7 +47,7 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       name createdAt cancelledAt
-      billingAddress { company }
+      billingAddress { company name }
       customer { displayName }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
@@ -144,7 +144,8 @@ def shoptet_lines(mapping, since, shipped, ship_day):
         ico = (r.get("billCompanyId") or r.get("customerIdentificationNumber") or "").strip()
         company = (r.get("billCompany") or "").strip()
         gso = bool(GSO_NAME.search(company)) or (gso_ico and ico == gso_ico)
-        customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else B2C_PRIVATE))
+        person = (r.get("billFullName") or r.get("billName") or "").strip()
+        customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
         o = r["code"]
         if o not in new_shipped:
             new_shipped[o] = (shipped or {}).get(o) or (max(d, ship_day) if shipped is not None else d)
@@ -213,11 +214,10 @@ def shopify_lines(mapping, since):
                 sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
             n_orders += 1
             day = local_day(o["createdAt"])
-            # odberateľ: firma z fakturačnej adresy; pri B2B (jednotlivé plechovky) inak meno zo zákazníckeho profilu,
-            # pri B2C bez firmy sa meno osoby neukladá
-            b2b = any(variants.get((li["variant"] or {}).get("id"), (None, ""))[1] == "B2B" for li in o["lineItems"]["nodes"])
-            company = ((o.get("billingAddress") or {}).get("company") or "").strip() \
-                or (((o.get("customer") or {}).get("displayName") or "").strip() if b2b else "") or PRIVATE
+            # odberateľ: firma z fakturačnej adresy, inak meno zo zákazníckeho profilu, inak meno vo fakturačnej adrese
+            bill = o.get("billingAddress") or {}
+            company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
+                or (bill.get("name") or "").strip() or PRIVATE
             # odoslané kusy podľa dátumu odoslania (fulfillment); zvyšok sa počíta k dátumu objednávky
             sent = defaultdict(list)
             for f in o["fulfillments"]:
