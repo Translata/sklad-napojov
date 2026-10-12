@@ -122,8 +122,10 @@
   table.t td.bad{color:var(--danger); font-weight:700;} table.t td.warn{color:var(--warn); font-weight:700;} table.t td.ok{color:var(--ok);}
   table.t tr.det td{background:var(--bg); padding:8px 10px; white-space:normal; text-align:left;}
   .caret{color:var(--faint); font-size:11px; margin-left:4px;}
-  .bar{display:flex; gap:8px; align-items:center; margin:0 0 12px;}
-  .bar select{flex:1; font-weight:600; padding:9px 10px;}
+  .bar{display:flex; gap:8px; align-items:center; justify-content:space-between; margin:0 0 12px;}
+  .bar select{font-weight:600;}
+  select{-webkit-appearance:none; appearance:none; width:auto; max-width:100%; padding:9px 34px 9px 12px;
+    background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%236b7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;}
   .bar .seg{margin:0; flex:0 0 auto;} .bar .seg button{padding:8px 12px; white-space:nowrap;}
   .formula .ln{padding:4px 0;} .formula .ln.zero{color:var(--faint);}
   .formula .ln.total{border-top:1px solid var(--border); margin-top:6px; padding-top:8px; font-size:17px; font-weight:700;}
@@ -179,7 +181,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v6.0";
+const APP_VERSION = "v6.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -188,7 +190,7 @@ const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
 const SITE_HOST = "translata.sharepoint.com", SITE_PATH = "/sites/liquidpositive";
 const FILE = "Sklad-app/sklad.json", FILE_SALES = "Sklad-app/predaje.json", FILE_V1 = "Sklad-app/sklad-data.json";
 const LP_NAMES = ["Orange","Marakuja","Granat","Granát","Pure","Cannabis","Cherry","Outlast"];
-const G_LP = "Liquid Positive", G_OTHER = "Krab a pivá";
+const G_LP = "Liquid Positive", G_OTHER = "Pivo";
 const OUT = {
   propagacia:{ label:"Propagácia", field:"Akcia", ph:"napr. Bratislava Marathon", gso:true },
   mimo:      { label:"Predaj mimo Shopify", field:"Odberateľ", ph:"napr. firma, číslo faktúry", gso:true },
@@ -215,7 +217,7 @@ function normalize(d){ ["drinks","receipts","counts","outs"].forEach(k => d[k] =
   // rozdané z v3 sú propagácia na účet GSO
   (d.giveaways || []).forEach(g => d.outs.push({ id:g.id, type:"propagacia", date:g.date, label:g.event, items:g.items, by:g.by, at:g.at }));
   delete d.giveaways;
-  d.drinks.forEach(x => { if (!x.key) x.key = x.name; delete x.gso; }); return d; }
+  d.drinks.forEach(x => { if (!x.key) x.key = x.name; delete x.gso; if (x.group === "Krab a pivá") x.group = G_OTHER; }); return d; }
 
 const drinks = (all) => S.data.drinks.filter(d => all || !d.hidden);
 const drinkById = id => S.data.drinks.find(d => d.id === id);
@@ -417,7 +419,7 @@ function renderPrehlad(){
   });
   h += `</div>`;
   const gso = ok.filter(x => x.r.gsoInv), gt = gso.reduce((s, x) => s + x.r.gsoInv, 0);
-  if (gt) h += `<div class="card"><details><summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:600"><span>Faktúra GSO</span><span class="num">${fmtN(gt)}</span></summary>
+  if (gt) h += `<div class="card"><details><summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:600"><span>Faktúra GSO</span><span class="num">${fmtN(gt)} ks</span></summary>
     <table class="t" style="margin-top:10px"><tr><th>Nápoj</th><th>Shopify</th><th>Mimo</th><th>Prop.</th><th>Spolu</th></tr>
     ${gso.map(({ d, r }) => `<tr><td>${esc(d.name)}</td><td>${fmtN(r.shopify)}</td><td>${fmtN(r.mimo)}</td><td>${fmtN(r.propagacia)}</td><td><b>${fmtN(r.gsoInv)}</b></td></tr>`).join("")}</table>
     <button class="secondary block" onclick="copyGso()">Kopírovať</button></details></div>`;
@@ -504,16 +506,16 @@ async function setNote(countId, drinkId, v){
 }
 
 /* ---------- POHYBY: všetko v mesiaci na jednom mieste ---------- */
-const P_FILTERS = [["all","Všetko"],["prijem","Príjem"],["shoptet","Shoptet"],["shopify","Shopify"],["vydaj","Výdaj"],["inv","Inventúra"]];
+const P_FILTERS = [["all","Všetko"],["prijem","Doskladnené"],["shoptet","Shoptet"],["shopify","Shopify"],["propagacia","Propagácia"],["mimo","Predaj mimo Shopify"],["odpis","Odpisy"],["inv","Inventúra"]];
 function movements(from, to){
   const vis = new Set(drinks().map(d => d.id)), inP = x => x >= from && x < to, E = [];
   const items = obj => Object.fromEntries(Object.entries(obj).filter(([id, n]) => vis.has(id) && n));
   const by = {};
   S.data.receipts.filter(r => inP(r.date)).forEach(r => { const k = r.batch || r.id;
-    const x = by[k] = by[k] || { key:"r" + k, kind:"prijem", date:r.date, title:"Príjem", sub:r.note || "", items:{}, sign:1, del:`delPrijem('${esc(k)}')` };
+    const x = by[k] = by[k] || { key:"r" + k, kind:"prijem", date:r.date, title:"Doskladnené", sub:r.note || "", items:{}, sign:1, del:`delPrijem('${esc(k)}')` };
     x.items[r.drinkId] = (x.items[r.drinkId] || 0) + r.qty; });
   E.push(...Object.values(by));
-  S.data.outs.filter(o => inP(o.date)).forEach(o => E.push({ key:"o" + o.id, kind:"vydaj", date:o.date, title:OUT[o.type].label, sub:o.label, items:o.items, sign:-1, del:`delVydaj('${o.id}')` }));
+  S.data.outs.filter(o => inP(o.date)).forEach(o => E.push({ key:"o" + o.id, kind:o.type, date:o.date, title:OUT[o.type].label, sub:o.label, items:o.items, sign:-1, del:`delVydaj('${o.id}')` }));
   const sh = {}; salesFor().sh.filter(l => !l.gso && inP(l.d)).forEach(l => {
     const x = sh[l.o] = sh[l.o] || { key:"s" + l.o, kind:"shoptet", date:l.d, title:`Shoptet ${l.o}`, sub:l.c, items:{}, sign:-1 };
     x.items[l.drinkId] = (x.items[l.drinkId] || 0) + l.q; });
