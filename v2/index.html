@@ -166,7 +166,7 @@
 <script>
 /* Sklad nápojov v5: komisionálny sklad s priebežnou evidenciou.
    Tovar patrí PPP, kým ho nepredá PPP (Shoptet) alebo GSO (Shopify, predaj mimo Shopify) alebo kým sa nerozdá či neodpíše.
-   Každý výdaj má doklad. Dátum pohybu = deň odoslania.
+   Každý výdaj má doklad. Dátum pohybu = dátum vytvorenia objednávky.
    Stav nápoja = počiatočný stav (prvá inventúra, v ktorej je nápoj) + príjmy − výdaje + inventúrne rozdiely.
    Inventúra je kontrola: počíta sa na začiatku dňa D, rozdiel = napočítané − evidovaný stav pred dňom D
    a zapíše sa ako pohyb s dátumom D − 1 (patrí ešte do predchádzajúceho dňa). Inventúra môže byť aj čiastočná.
@@ -174,7 +174,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v5.2";
+const APP_VERSION = "v5.3";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -556,8 +556,6 @@ function renderMesiac(){
   h += `<div class="card"><div class="muted">${startLbl} ${fmtN(T("open"))} → ${running ? "dnes" : lastDay} <b style="color:var(--text)">${fmtN(T("close"))}</b></div>
     <div class="big num ${counted ? diffCls(adj) : ""}" style="${counted ? "" : "color:var(--muted)"}">${counted ? (adj ? `${diffWord(adj)} ${fmtN(Math.abs(adj))} ks` : "Inventúra sedí") : "Bez inventúry"}</div>
     <div class="flow">Príjem ${fmtN(T("prod"))} · PPP ${fmtN(T("ppp"))}${hasGso ? ` · GSO ${fmtN(T("gsoInv"))}` : ""}${T("odpis") ? ` · odpisy ${fmtN(T("odpis"))}` : ""}</div></div>`;
-  const open = ((S.sales || {}).shopifyOpen || []).filter(o => inP(o.d));
-  if (open.length && hasGso) h += `<div class="note">${open.length} ${open.length === 1 ? "objednávka" : "objednávky"} v Shopify bez označenia odoslané (${fmtN(open.reduce((s, o) => s + o.q, 0))} ks): ${open.map(o => esc(o.o)).join(", ")}. Počítajú sa ku dňu objednávky.</div>`;
 
   h += `<div class="seg"><button class="${S.mTab === "sklad" ? "on" : ""}" onclick="S.mTab='sklad';renderMesiac()">Sklad</button>
     ${hasGso ? `<button class="${S.mTab === "gso" ? "on" : ""}" onclick="S.mTab='gso';renderMesiac()">Faktúra GSO</button>` : ""}
@@ -597,7 +595,7 @@ function renderOrders(list, inP, T){
   const sh = {}, sf = {};
   salesFor().sh.filter(l => ids.has(l.drinkId) && inP(l.d)).forEach(l => add(sh, l.o, { o:l.o, d:l.d, c:l.c, gso:l.gso }, l.drinkId, l.q));
   ((S.sales || {}).shopifyOrders || []).forEach(l => { const id = byKey[norm(l.k)];
-    if (id && ids.has(id) && inP(l.d)) add(sf, l.o + l.d, { o:l.o, d:l.d, c:l.c, t:l.t, open:l.open }, id, l.q); });
+    if (id && ids.has(id) && inP(l.d)) add(sf, l.o, { o:l.o, d:l.d, c:l.c, t:l.t }, id, l.q); });
   const row = (x, sub, muted) => `<div class="entry"${muted ? ` style="opacity:.6"` : ""}><div class="l"><b>${esc(x.o)}</b> <span class="muted">${fmtDs(x.d)}</span>
     <div class="muted">${sub}</div><div class="muted">${Object.entries(x.items).map(([id, n]) => `${esc(name(id))} ${fmtN(n)}`).join(", ")}</div></div>
     <div class="r"><b class="num">${fmtN(x.n)}</b></div></div>`;
@@ -608,7 +606,7 @@ function renderOrders(list, inP, T){
       : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
   } else if (S.oSrc === "shopify") {
     const o = sorted(sf);
-    h += `<div class="card">` + (o.length ? o.map(x => row(x, `${esc(x.t === "B2B" && x.c === "Súkromná osoba" ? "Firma bez názvu v Shopify" : x.c)} · ${x.t === "B2B" ? "B2B plechovky" : "B2C balíčky"}${x.open ? ` · <span style="color:var(--warn)">neoznačené ako odoslané</span>` : ""}`)).join("")
+    h += `<div class="card">` + (o.length ? o.map(x => row(x, `${esc(x.t === "B2B" && x.c === "Súkromná osoba" ? "Firma bez názvu v Shopify" : x.c)} · ${x.t === "B2B" ? "B2B plechovky" : "B2C balíčky"}`)).join("")
       : `<div class="empty">V tomto mesiaci žiadne.</div>`) + `</div>`;
   } else {
     const c = {};
@@ -689,7 +687,7 @@ function seedDemo(){
   return d;
 }
 function seedDemoSales(){
-  return { updatedAt:new Date().toISOString(), since:"2026-07-01", shopifyOpen:[{ o:"#1236", d:"2026-09-16", q:260 }], unmapped:{ shoptet:{ "340 NILIO Great Warrior 330ml":264 }, shopify:{} },
+  return { updatedAt:new Date().toISOString(), since:"2026-07-01", unmapped:{ shoptet:{ "340 NILIO Great Warrior 330ml":264 }, shopify:{} },
     shoptet:[{ d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Orange", q:1038 }, { d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Marakuja", q:944 },
       { d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Granat", q:686 }, { d:"2026-09-04", o:"490", c:"Firma Alfa s.r.o.", gso:false, k:"Marakuja", q:132 },
       { d:"2026-09-20", o:"500", c:"Firma Beta a.s.", gso:false, k:"Krab 0,5 plech", q:110 }, { d:"2026-10-04", o:"520", c:"Firma Alfa s.r.o.", gso:false, k:"Orange", q:24 }],

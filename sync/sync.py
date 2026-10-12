@@ -12,8 +12,7 @@ Premenné prostredia (lokálne v .env vedľa skriptu alebo v ../import/.env, na 
 
 Výpis neobsahuje mená zákazníkov ani odkazy (logy na GitHube sú verejné).
 
-Dátum pohybu = deň odoslania: Shopify podľa fulfillmentu (neodoslané kusy k dátumu objednávky, zoznam v shopifyOpen),
-Shoptet podľa dňa, keď sa objednávka prvýkrát objavila v stave Odoslaná (shoptetShipped, prenáša sa medzi behmi).
+Dátum pohybu = dátum vytvorenia objednávky (Shopify aj Shoptet).
 
 Použitie:  python3 sync.py [--from 2026-07-01] [--out predaje.json] [--no-upload]
 """
@@ -29,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -52,10 +51,6 @@ query($q: String!, $after: String) {
       lineItems(first: 50) {
         pageInfo { hasNextPage }
         nodes { id title currentQuantity variant { id } }
-      }
-      fulfillments {
-        createdAt status
-        fulfillmentLineItems(first: 50) { nodes { quantity lineItem { id } } }
       }
     }
   }
@@ -106,10 +101,7 @@ def local_day(ts):
 
 # ---------- Shoptet (PPP) ----------
 
-def shoptet_lines(mapping, since, shipped, ship_day):
-    """shipped: {objednávka: dátum odoslania} z predchádzajúcich behov (None pri prvom behu).
-    Export nemá dátum expedície, preto sa za neho berie deň, kedy sa objednávka prvýkrát objavila
-    v stave Odoslaná (ship_day). Pri prvom behu sa pre staršie objednávky použije dátum objednávky."""
+def shoptet_lines(mapping, since):
     raw = http(env("SHOPTET_EXPORT_URL"), headers={"User-Agent": "sklad-app-sync/1.0"})
     try:
         text = raw.decode("utf-8-sig")
@@ -128,7 +120,6 @@ def shoptet_lines(mapping, since, shipped, ship_day):
     agg = defaultdict(float)
     unmapped = defaultdict(float)
     orders = set()
-    new_shipped = {}
     for r in rows:
         d = (r.get("date") or "")[:10]
         if d < since or r.get("orderItemType") != "product":
@@ -147,15 +138,13 @@ def shoptet_lines(mapping, since, shipped, ship_day):
         person = (r.get("billFullName") or r.get("billName") or "").strip()
         customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
         o = r["code"]
-        if o not in new_shipped:
-            new_shipped[o] = (shipped or {}).get(o) or (max(d, ship_day) if shipped is not None else d)
         for name, n in per_unit[code].items():
-            agg[(new_shipped[o], d, o, customer, gso, name)] += qty * n
+            agg[(d, o, customer, gso, name)] += qty * n
         orders.add(o)
 
-    lines = [{"d": sd, "od": od, "o": o, "c": c, "gso": g, "k": k, "q": round(q)}
-             for (sd, od, o, c, g, k), q in sorted(agg.items()) if round(q)]
-    return lines, dict(unmapped), len(orders), new_shipped
+    lines = [{"d": d, "o": o, "c": c, "gso": g, "k": k, "q": round(q)}
+             for (d, o, c, g, k), q in sorted(agg.items()) if round(q)]
+    return lines, dict(unmapped), len(orders)
 
 
 # ---------- Shopify (GSO) ----------
@@ -190,7 +179,6 @@ def shopify_lines(mapping, since):
 
     agg = defaultdict(int)
     unmapped = defaultdict(int)
-    open_orders = []
     per_order = defaultdict(int)
     n_orders = 0
     after = None
@@ -209,8 +197,7 @@ def shopify_lines(mapping, since):
         for o in page["nodes"]:
             if o["cancelledAt"]:
                 continue
-            if o["lineItems"]["pageInfo"]["hasNextPage"] or any(
-                    f["fulfillmentLineItems"].get("pageInfo", {}).get("hasNextPage") for f in o["fulfillments"]):
+            if o["lineItems"]["pageInfo"]["hasNextPage"]:
                 sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
             n_orders += 1
             day = local_day(o["createdAt"])
@@ -218,14 +205,6 @@ def shopify_lines(mapping, since):
             bill = o.get("billingAddress") or {}
             company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
                 or (bill.get("name") or "").strip() or PRIVATE
-            # odoslané kusy podľa dátumu odoslania (fulfillment); zvyšok sa počíta k dátumu objednávky
-            sent = defaultdict(list)
-            for f in o["fulfillments"]:
-                if f["status"] != "SUCCESS":
-                    continue
-                for fl in f["fulfillmentLineItems"]["nodes"]:
-                    sent[fl["lineItem"]["id"]].append((local_day(f["createdAt"]), fl["quantity"]))
-            open_cans = 0
             for li in o["lineItems"]["nodes"]:
                 qty = li["currentQuantity"]  # už bez refundovaných a odobraných kusov
                 vid = (li["variant"] or {}).get("id")
@@ -235,30 +214,16 @@ def shopify_lines(mapping, since):
                     unmapped[li["title"][:60]] += qty
                     continue
                 cans, kind = variants[vid]
-                parts, left = [], qty
-                for sd, sq in sorted(sent.get(li["id"], [])):
-                    take = min(sq, left)
-                    if take > 0:
-                        parts.append((sd, take))
-                        left -= take
-                if left > 0:
-                    parts.append((day, left))
-                    open_cans += left * sum(cans.values())
-                for i, (pd, pq) in enumerate(parts):
-                    unsent = left > 0 and i == len(parts) - 1
-                    for name, n in cans.items():
-                        agg[(pd, name, kind)] += n * pq
-                        per_order[(o["name"], pd, day, company, kind, name, unsent)] += n * pq
-            if open_cans:
-                open_orders.append({"o": o["name"], "d": day, "q": open_cans})
+                for name, n in cans.items():
+                    agg[(day, name, kind)] += n * qty
+                    per_order[(o["name"], day, company, kind, name)] += n * qty
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "q": q} for (d, k, t), q in sorted(agg.items()) if q]
-    orders = [{"o": o, "d": d, "od": od, "c": c, "t": t, "k": k, "q": q, **({"open": True} if u else {})}
-              for (o, d, od, c, t, k, u), q in sorted(per_order.items()) if q]
-    return lines, dict(unmapped), n_orders, open_orders, orders
+    orders = [{"o": o, "d": d, "c": c, "t": t, "k": k, "q": q} for (o, d, c, t, k), q in sorted(per_order.items()) if q]
+    return lines, dict(unmapped), n_orders, orders
 
 
 # ---------- SharePoint ----------
@@ -280,18 +245,6 @@ def graph():
     return _graph
 
 
-def download_previous():
-    g = graph()
-    req = urllib.request.Request(g["url"], headers=g["auth"])
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        sys.exit(f"HTTP {e.code} pri čítaní predchádzajúceho {TARGET}")
-
-
 def upload(data):
     g = graph()
     http(g["url"], data=json.dumps(data, ensure_ascii=False).encode(), method="PUT",
@@ -308,27 +261,14 @@ def main():
     mapping = json.loads((HERE / "mapping.json").read_text())
 
     use_graph = not a.no_upload and bool(os.environ.get("GRAPH_CLIENT_SECRET"))
-    if use_graph:
-        prev = download_previous()
-    elif a.out and Path(a.out).exists():
-        prev = json.loads(Path(a.out).read_text())
-    else:
-        prev = None
-    shipped = (prev or {}).get("shoptetShipped")
-    # nočný beh (pred poludním) zachytí objednávky odoslané včera
-    now = datetime.now(TZ)
-    ship_day = (now.date() - timedelta(days=1) if now.hour < 12 else now.date()).isoformat()
-
-    sh_lines, sh_unmapped, sh_orders, shipped = shoptet_lines(mapping, a.since, shipped, ship_day)
-    sf_lines, sf_unmapped, sf_orders, sf_open, sf_order_lines = shopify_lines(mapping, a.since)
+    sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
+    sf_lines, sf_unmapped, sf_orders, sf_order_lines = shopify_lines(mapping, a.since)
     data = {
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "since": a.since,
         "shoptet": sh_lines,
         "shopify": sf_lines,
-        "shopifyOpen": sf_open,
         "shopifyOrders": sf_order_lines,
-        "shoptetShipped": shipped,
         "unmapped": {"shoptet": sh_unmapped, "shopify": sf_unmapped},
     }
 
@@ -336,7 +276,6 @@ def main():
     direct = sum(l["q"] for l in sh_lines if not l["gso"])
     print(f"Od {a.since}: Shoptet {sh_orders} objednávok (GSO {gso} ks, priamo {direct} ks), "
           f"Shopify {sf_orders} objednávok ({sum(l['q'] for l in sf_lines)} ks)")
-    print(f"Shopify neoznačené ako odoslané: {len(sf_open)} objednávok ({sum(x['q'] for x in sf_open)} ks)")
     print(f"Nesledované položky: Shoptet {len(sh_unmapped)}, Shopify {len(sf_unmapped)}")
 
     if a.out:
