@@ -175,13 +175,14 @@
    Tovar patrí PPP, kým ho nepredá PPP (Shoptet) alebo GSO (Shopify, predaj mimo Shopify) alebo kým sa nerozdá či neodpíše.
    Každý výdaj má doklad. Dátum pohybu = dátum vytvorenia objednávky.
    Stav nápoja = počiatočný stav (prvá inventúra, v ktorej je nápoj) + príjmy − výdaje + inventúrne rozdiely.
-   Inventúra je kontrola: počíta sa na začiatku dňa D, rozdiel = napočítané − evidovaný stav pred dňom D
-   a zapíše sa ako pohyb s dátumom D − 1 (patrí ešte do predchádzajúceho dňa). Inventúra môže byť aj čiastočná.
+   Inventúra je kontrola: počíta sa na začiatku dňa D, rozdiel = napočítané − evidovaný stav pred dňom D.
+   Inventúra v prvom týždni mesiaca uzatvára predchádzajúci mesiac (rozdiel k jeho poslednému dňu), inak sa rozdiel
+   zapíše k dňu D − 1. Inventúra môže byť aj čiastočná.
    Rozdiely sa prepočítavajú pri každej zmene údajov, takže dodatočne zadaný príjem rozdiel opraví.
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v6.1";
+const APP_VERSION = "v6.2";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -240,6 +241,9 @@ function salesFor(){
 const MONTHS = ["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
 const monthName = ym => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
 const nextMonth = ym => { let [y, m] = ym.split("-").map(Number); m++; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, "0")}`; };
+/* inventúra sa počíta ráno; v prvom týždni mesiaca uzatvára predchádzajúci mesiac (rozdiel k jeho poslednému dňu),
+   inak sa rozdiel zapíše k predchádzajúcemu dňu */
+const adjDate = d => +d.slice(8) <= 7 ? addDays(d.slice(0, 8) + "01", -1) : addDays(d, -1);
 function buildLedger(){
   const sales = salesFor(), C = counts(), L = {};
   S.data.drinks.forEach(d => {
@@ -254,7 +258,7 @@ function buildLedger(){
     const m = mv.filter(x => x.date >= start.date), adj = [];
     C.filter(c => c.date > start.date && c.counts[d.id] != null).forEach(c => {
       const book = start.qty + m.reduce((s, x) => s + (x.date < c.date ? x.q : 0), 0) + adj.reduce((s, a) => s + a.diff, 0);
-      adj.push({ date:addDays(c.date, -1), countDate:c.date, countId:c.id, counted:c.counts[d.id], book, diff:c.counts[d.id] - book, note:(c.notes || {})[d.id] || "" });
+      adj.push({ date:adjDate(c.date), countDate:c.date, countId:c.id, counted:c.counts[d.id], book, diff:c.counts[d.id] - book, note:(c.notes || {})[d.id] || "" });
     });
     L[d.id] = { start, mv:m, adj };
   });
@@ -526,7 +530,7 @@ function movements(from, to){
     x.items[byKey[norm(l.k)]] = (x.items[byKey[norm(l.k)]] || 0) + l.q; });
   E.push(...Object.values(sf));
   const L = buildLedger();
-  S.data.counts.filter(c => inP(c.date)).forEach(c => {
+  S.data.counts.filter(c => inP(adjDate(c.date)) || (inP(c.date) && c.id === counts()[0].id)).forEach(c => {
     const adj = {}; S.data.drinks.forEach(d => { const a = L[d.id].adj.find(a => a.countId === c.id); if (a && a.diff) adj[d.id] = a.diff; });
     E.push({ key:"c" + c.id, kind:"inv", date:c.date, title:"Inventúra", sub:"", items:adj, sign:1, count:c, del:`delInventura('${c.id}')` });
   });
