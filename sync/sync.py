@@ -140,11 +140,11 @@ def shoptet_lines(mapping, since):
         customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
         o = r["code"]
         for name, n in per_unit[code].items():
-            agg[(d, o, customer, gso, name)] += qty * n
+            agg[(d, o, customer, ico, gso, name)] += qty * n
         orders.add(o)
 
-    lines = [{"d": d, "o": o, "c": c, "gso": g, "k": k, "q": round(q)}
-             for (d, o, c, g, k), q in sorted(agg.items()) if round(q)]
+    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), "gso": g, "k": k, "q": round(q)}
+             for (d, o, c, i, g, k), q in sorted(agg.items()) if round(q)]
     return lines, dict(unmapped), len(orders)
 
 

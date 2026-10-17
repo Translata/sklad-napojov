@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<title>Sklad nápojov</title>
+<title>Liquid Positive</title>
 <link rel="icon" type="image/svg+xml" href="../favicon.svg">
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.3/lib/msal-browser.min.js"></script>
 <style>
@@ -137,15 +137,21 @@
   select.locsel.ppp{background-color:#eef2ff; color:#1d4ed8; border-color:#c7d2fe;}
   select.locsel.gso{background-color:#fff7ed; color:#c2410c; border-color:#fed7aa;}
   .mv-det{padding:0 0 12px; border-bottom:1px solid var(--line);}
+  header .mode{margin:0; width:180px;}
+  .chip{display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;}
+  .chip.ok{background:var(--ok-soft); color:var(--ok);} .chip.neu{background:#eceef2; color:var(--muted);}
+  .chip.warn{background:var(--warn-soft); color:var(--warn);} .chip.ppp{background:#eef2ff; color:#1d4ed8;} .chip.sql{background:#f3e8ff; color:#7e22ce;}
+  a{color:var(--accent); text-decoration:none;}
   .demo{background:var(--warn-soft); color:var(--warn); text-align:center; font-size:12px; padding:4px;}
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Sklad nápojov</h1>
+  <h1 id="hdr-title">Liquid Positive</h1>
+  <div class="seg mode" id="mode-sw" style="display:none"><button data-m="sklad" onclick="setMode('sklad')">Sklad</button><button data-m="crm" onclick="setMode('crm')">CRM</button></div>
   <div class="right" id="hdr-right" style="display:none;">
-    <button class="link" onclick="go('nastavenia')">Nastavenia</button>
+    <button class="link" onclick="S.modeBeforeSettings=isCrm(S.screen)?'crm':'sklad';go('nastavenia')">Nastavenia</button>
   </div>
 </header>
 <div id="demo-bar" class="demo" style="display:none;">Ukážkový režim: dáta sú len v tomto prehliadači.</div>
@@ -165,11 +171,22 @@
   <section id="screen-zadat" class="screen"></section>
   <section id="screen-pohyby" class="screen"></section>
   <section id="screen-nastavenia" class="screen"></section>
+  <section id="screen-crm-dnes" class="screen"></section>
+  <section id="screen-crm-firmy" class="screen"></section>
+  <section id="screen-crm-firma" class="screen"></section>
+  <section id="screen-crm-edit" class="screen"></section>
+  <section id="screen-crm-kontakty" class="screen"></section>
+  <section id="screen-crm-kedit" class="screen"></section>
 </main>
-<nav class="tabs">
+<nav class="tabs" id="nav-sklad">
   <button data-s="prehlad" onclick="go('prehlad')"><svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v9l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v9"/></svg>Prehľad</button>
   <button data-s="zadat" onclick="go('zadat')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg>Zadať</button>
   <button data-s="pohyby" onclick="go('pohyby')"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Pohyby</button>
+</nav>
+<nav class="tabs" id="nav-crm" style="display:none">
+  <button data-s="crm-dnes" onclick="go('crm-dnes')"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Na dnes</button>
+  <button data-s="crm-firmy" onclick="go('crm-firmy')"><svg viewBox="0 0 24 24"><path d="M4 20V6l7-3v17M11 9h9v11M7 8v.5M7 12v.5M7 16v.5M15 13v.5M15 16.5v.5"/><path d="M3 20h18"/></svg>Firmy</button>
+  <button data-s="crm-kontakty" onclick="go('crm-kontakty')"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg>Kontakty</button>
 </nav>
 </div>
 <div class="toast" id="toast"></div>
@@ -185,7 +202,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v7.2";
+const APP_VERSION = "v8.0";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -392,16 +409,25 @@ async function mutate(fn, okMsg){
 const stamp = () => ({ by:S.user, at:new Date().toISOString() });
 
 /* ---------- navigácia ---------- */
+const isCrm = s => s.startsWith("crm-");
+const NAV_OF = { "crm-firma":"crm-firmy", "crm-edit":"crm-firmy", "crm-kedit":"crm-kontakty" };
+function setMode(m){ go(m === "crm" ? (S.lastCrm || "crm-dnes") : (S.lastSklad || "prehlad")); }
 function go(s){
+  if (s !== "nastavenia") { if (isCrm(s)) S.lastCrm = NAV_OF[s] || s; else S.lastSklad = s; }
+  if (s === "crm-firmy" || s === "crm-dnes") C.back = s;
   S.screen = s;
+  const crm = isCrm(s);
+  $("nav-sklad").style.display = crm ? "none" : "flex"; $("nav-crm").style.display = crm ? "flex" : "none";
+  document.querySelectorAll("#mode-sw button").forEach(b => b.classList.toggle("on", b.dataset.m === (crm ? "crm" : "sklad")));
   document.querySelectorAll(".screen").forEach(e => e.classList.toggle("active", e.id === "screen-" + s));
-  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.s === s));
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.s === (NAV_OF[s] || s)));
   window.scrollTo(0, 0); renderAll();
 }
 function renderAll(){
   if (!S.data) return;
-  $("hdr-right").style.display = "flex";
-  ({ prehlad:renderPrehlad, zadat:renderZadat, pohyby:renderPohyby, nastavenia:renderNastavenia }[S.screen])();
+  $("hdr-right").style.display = "flex"; $("mode-sw").style.display = "flex"; $("hdr-title").style.display = "none";
+  ({ prehlad:renderPrehlad, zadat:renderZadat, pohyby:renderPohyby, nastavenia:renderNastavenia, "crm-dnes":renderCrmDnes, "crm-firmy":renderCrmFirmy,
+     "crm-firma":renderCrmFirma, "crm-edit":renderCrmEdit, "crm-kontakty":renderCrmKontakty, "crm-kedit":renderCrmKedit }[S.screen])();
 }
 const ln = (label, v, cls = "") => `<div class="ln ${cls}"><span>${label}</span><span class="v">${v}</span></div>`;
 function syncInfo(){
@@ -635,10 +661,260 @@ async function delInventura(id){
   await mutate(() => { S.data.counts = S.data.counts.filter(x => x.id !== id); }, "Zmazané");
 }
 
+/* ---------- CRM (obchodný tím) ----------
+   Dáta ostávajú v zoznamoch SharePointu: Companies, Contacts a CRM historia. Appka je ich rozhranie,
+   každá položka sa ukladá zvlášť (Graph list items), takže súčasné úpravy viacerých ľudí sa nebijú. */
+const LIST = { firmy:"Companies", kontakty:"Contacts", hist:"CRM historia" };
+const CF = { name:"Title", lastContact:"field_0", distributor:"field_2", weight:"field_3", area:"field_4", source:"field_5", pricelist:"field_6",
+  address:"field_7", city:"field_8", next:"field_9", notes:"field_10", status:"field_11", owner:"Owner", tag:"Tag", ico:"ICO" };
+const STATUS = ["Lead","SQL","Deal","No Lead","On Hold"];
+const STATUS_CLS = { "Lead":"ppp", "SQL":"sql", "Deal":"ok", "No Lead":"neu", "On Hold":"warn" };
+const HIST_TYPES = ["Hovor","Stretnutie","E-mail","Iné"];
+const C = { loaded:false, loading:null, firmy:[], kontakty:[], hist:[], noHist:false, q:"", status:"", owner:"", kq:"", open:null, edit:null, kedit:null, kfirm:null };
+try { C.owner = localStorage.getItem("crm_owner") || ""; } catch(e){}
+
+const listUrl = l => `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${encodeURIComponent(l)}/items`;
+const GraphLists = {
+  async all(l){
+    await siteId(); let url = listUrl(l) + "?expand=fields&$top=999", out = [];
+    while (url) {
+      const r = await gfetch(url);
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`Zoznam ${l} (${r.status})`);
+      const j = await r.json(); out = out.concat(j.value.map(it => ({ ...it.fields, id:it.id }))); url = j["@odata.nextLink"];
+    }
+    return out;
+  },
+  async update(l, id, fields){
+    const r = await gfetch(`${listUrl(l)}/${id}/fields`, { method:"PATCH", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(fields) });
+    if (!r.ok) throw new Error(`Uloženie (${r.status}) ${(await r.text()).slice(0, 120)}`);
+    return await r.json();
+  },
+  async create(l, fields){
+    const r = await gfetch(listUrl(l), { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ fields }) });
+    if (!r.ok) throw new Error(`Uloženie (${r.status}) ${(await r.text()).slice(0, 120)}`);
+    const j = await r.json(); return { ...j.fields, id:j.id };
+  }
+};
+const DemoLists = {
+  get(l){ try { const v = localStorage.getItem("crm_demo:" + l); if (v) return JSON.parse(v); } catch(e){} return (window.__crm = window.__crm || {})[l] || seedCrm()[l]; },
+  put(l, v){ try { localStorage.setItem("crm_demo:" + l, JSON.stringify(v)); } catch(e){ (window.__crm = window.__crm || {})[l] = v; } },
+  async all(l){ return this.get(l); },
+  async update(l, id, fields){ const a = this.get(l), x = a.find(i => i.id === id); Object.assign(x, fields);
+    if (fields.ContactsLookupId) x.Contacts = fields.ContactsLookupId.map(i => ({ LookupId:i })); this.put(l, a); return x; },
+  async create(l, fields){ const a = this.get(l), x = { ...fields, id:String(Date.now()) }; a.push(x); this.put(l, a); return x; }
+};
+const Lists = DEMO ? DemoLists : GraphLists;
+
+async function loadCrm(force){
+  if (C.loaded && !force) return;
+  if (!C.loading) C.loading = (async () => {
+    const [f, k, h] = await Promise.all([Lists.all(LIST.firmy), Lists.all(LIST.kontakty), Lists.all(LIST.hist)]);
+    C.firmy = f || []; C.kontakty = k || []; C.hist = h || []; C.noHist = h === null; C.loaded = true;
+  })().finally(() => { C.loading = null; });
+  await C.loading;
+}
+async function crmSave(fn, okMsg){
+  try { await fn(); if (okMsg) toast(okMsg); renderAll(); return true; }
+  catch(e){ toast("Chyba: " + e.message); return false; }
+}
+
+/* pomocné */
+const dLocal = v => { if (!v) return ""; const d = new Date(v); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const dWrite = v => v ? v + "T12:00:00Z" : null;
+const firmById = id => C.firmy.find(f => f.id === id);
+const contactById = id => C.kontakty.find(k => String(k.id) === String(id));
+const contactsOf = f => (f.Contacts || []).map(c => contactById(c.LookupId)).filter(Boolean);
+const firmsOfContact = k => C.firmy.filter(f => (f.Contacts || []).some(c => String(c.LookupId) === String(k.id)));
+const kName = k => [k.field_1, k.Title].filter(Boolean).join(" ");
+function telOf(k){
+  if (k.Telefon) return k.Telefon;
+  if (k.field_2 == null) return "";
+  const d = String(Math.round(k.field_2));
+  if (d.length === 9) return `+421 ${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  if (d.length === 12 && /^42[01]/.test(d)) return `+${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6, 9)} ${d.slice(9)}`;
+  return d;
+}
+const optionsOf = (field, base = []) => [...new Set([...base, ...C.firmy.map(f => f[field]).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "sk"));
+const statusChip = s => s ? `<span class="chip ${STATUS_CLS[s] || "neu"}">${esc(s)}</span>` : "";
+const coNorm = s => norm(s).replace(/[.,]/g, "").replace(/(spolsro|sro|as|vos|ks)$/, "");
+function nextBadge(f){
+  const n = dLocal(f[CF.next]); if (!n) return "";
+  const t = todayISO(), cls = n < t ? "bad" : n === t ? "warn" : "";
+  return `<div class="muted num" style="${cls === "bad" ? "color:var(--danger);font-weight:600" : cls === "warn" ? "color:var(--warn);font-weight:600" : ""}">${fmtDs(n)}</div>`;
+}
+function firmRow(f){
+  return `<div class="mv" onclick="openFirm('${f.id}')"><div class="l"><b>${esc(f[CF.name])}</b>
+    <div class="muted">${[f[CF.city], f[CF.owner]].filter(Boolean).map(esc).join(" · ")}</div></div>
+    <div class="r" style="text-align:right;font-weight:400">${statusChip(f[CF.status])}${nextBadge(f)}</div></div>`;
+}
+function openFirm(id){ C.open = id; go("crm-firma"); }
+const crmWait = el => { el.innerHTML = `<div class="center" style="min-height:40vh"><div class="spinner"></div></div>`; };
+function crmGuard(el, render){
+  if (C.loaded) return true;
+  crmWait(el); loadCrm().then(render).catch(e => { el.innerHTML = `<div class="card note bad">Chyba pri načítaní CRM: ${esc(e.message)}</div>`; });
+  return false;
+}
+const ownerSelect = rerender => `<select onchange="C.owner=this.value;try{localStorage.setItem('crm_owner',this.value)}catch(e){};${rerender}()">
+  <option value="">Všetci</option>${optionsOf(CF.owner).map(o => `<option ${o === C.owner ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+
+/* NA DNES: komu treba zavolať */
+function renderCrmDnes(){
+  const el = $("screen-crm-dnes"); if (!crmGuard(el, renderCrmDnes)) return;
+  const t = todayISO(), wk = addDays(t, 7);
+  const list = C.firmy.filter(f => dLocal(f[CF.next]) && dLocal(f[CF.next]) <= wk && (!C.owner || f[CF.owner] === C.owner))
+    .sort((a, b) => dLocal(a[CF.next]).localeCompare(dLocal(b[CF.next])));
+  const grp = [["Po termíne", f => dLocal(f[CF.next]) < t], ["Dnes", f => dLocal(f[CF.next]) === t], ["Do 7 dní", f => dLocal(f[CF.next]) > t]];
+  let h = `<div class="bar"><h2 style="margin:0 4px;font-size:22px">Na dnes</h2>${ownerSelect("renderCrmDnes")}</div>`;
+  if (!list.length) h += `<div class="card empty">Nikomu netreba volať.</div>`;
+  grp.forEach(([l, fn]) => { const g = list.filter(fn); if (g.length) h += `<div class="card"><h3>${l} (${g.length})</h3>${g.map(firmRow).join("")}</div>`; });
+  el.innerHTML = h;
+}
+
+/* FIRMY */
+function renderCrmFirmy(){
+  const el = $("screen-crm-firmy"); if (!crmGuard(el, renderCrmFirmy)) return;
+  const q = norm(C.q);
+  const list = C.firmy.filter(f => (!C.status || f[CF.status] === C.status) && (!C.owner || f[CF.owner] === C.owner)
+    && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)))
+    .sort((a, b) => (a[CF.name] || "").localeCompare(b[CF.name] || "", "sk"));
+  let h = `<div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.q)}" oninput="C.q=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirmy();const i=document.querySelector('#screen-crm-firmy input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
+    <div class="bar"><select onchange="C.status=this.value;renderCrmFirmy()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+    ${ownerSelect("renderCrmFirmy")}<button class="small" style="margin-left:auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
+    <div class="card">${list.length ? list.map(firmRow).join("") : `<div class="empty">Nič sa nenašlo.</div>`}</div>
+    <p class="muted" style="text-align:center">${list.length} z ${C.firmy.length}</p>`;
+  el.innerHTML = h;
+}
+
+/* predaje firmy zo skladových dát: Shoptet podľa IČO alebo názvu, Shopify podľa názvu */
+function firmSales(f){
+  const ico = (f[CF.ico] || "").replace(/\s/g, ""), n = coNorm(f[CF.name]), o = {};
+  const s = S.sales || {};
+  (s.shoptet || []).filter(l => !l.gso && ((ico && l.i === ico) || coNorm(l.c) === n)).forEach(l => {
+    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+  (s.shopifyOrders || []).filter(l => coNorm(l.c) === n).forEach(l => {
+    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+  return Object.values(o).sort((a, b) => b.d.localeCompare(a.d));
+}
+
+/* DETAIL FIRMY */
+function renderCrmFirma(){
+  const el = $("screen-crm-firma"); if (!crmGuard(el, renderCrmFirma)) return;
+  const f = firmById(C.open); if (!f) { go("crm-firmy"); return; }
+  const kk = contactsOf(f), sales = firmSales(f), hist = C.hist.filter(x => String(x.FirmaId) === String(f.id)).sort((a, b) => (b.Datum || "").localeCompare(a.Datum || ""));
+  const row = (l, v) => v ? ln(l, esc(v)) : "";
+  let h = `<div class="title"><button class="link" style="padding-left:0" onclick="go(C.back||'crm-firmy')">‹ Späť</button><button class="link" onclick="C.edit='${f.id}';go('crm-edit')">Upraviť</button></div>
+    <div class="card"><h2 style="margin:0 0 6px;font-size:20px">${esc(f[CF.name])}</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${statusChip(f[CF.status])}${[f[CF.owner], f[CF.weight], f[CF.area]].filter(Boolean).map(x => `<span class="chip neu">${esc(x)}</span>`).join("")}</div>
+    ${row("Ďalší kontakt", dLocal(f[CF.next]) && fmtD(dLocal(f[CF.next])))}${row("Posledný kontakt", dLocal(f[CF.lastContact]) && fmtD(dLocal(f[CF.lastContact])))}
+    ${row("IČO", f[CF.ico])}${row("Adresa", [f[CF.address], f[CF.city]].filter(Boolean).join(", "))}${row("Cenník", f[CF.pricelist])}${row("Zdroj", f[CF.source])}${row("Distribútor", f[CF.distributor])}</div>`;
+  h += `<div class="card"><h3>Kontakty</h3>${kk.map(k => { const tel = telOf(k);
+      return `<div class="mv" onclick="C.kedit='${k.id}';C.kfirm='${f.id}';go('crm-kedit')"><div class="l"><b>${esc(kName(k))}</b>${k.field_5 ? `<div class="muted">${esc(k.field_5)}</div>` : ""}
+      <div style="margin-top:4px">${tel ? `<a href="tel:${tel.replace(/\s/g, "")}" onclick="event.stopPropagation()">${esc(tel)}</a>` : ""}${tel && k.field_3 ? " · " : ""}${k.field_3 ? `<a href="mailto:${esc(k.field_3)}" onclick="event.stopPropagation()">${esc(k.field_3)}</a>` : ""}</div></div></div>`; }).join("") || `<div class="muted">Žiadne kontakty.</div>`}
+    <button class="small secondary" style="margin-top:10px" onclick="C.kedit='new';C.kfirm='${f.id}';go('crm-kedit')">+ Kontakt</button></div>`;
+  const total = sales.reduce((s, x) => s + x.q, 0);
+  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Posledná objednávka", fmtD(sales[0].d))}
+    <table class="t" style="margin-top:8px">${sales.slice(0, 6).map(x => `<tr><td>${fmtDs(x.d)} <span class="muted">${x.src} ${esc(x.o)}</span></td><td>${fmtN(x.q)}</td></tr>`).join("")}</table>`
+    : `<div class="muted">${f[CF.ico] ? "Žiadne objednávky." : "Žiadne objednávky. Doplň IČO, aby sa objednávky zo Shoptetu spárovali spoľahlivo."}</div>`}</div>`;
+  h += `<div class="card"><h3>História</h3>${C.noHist ? `<div class="note">Zoznam „CRM historia“ v SharePointe ešte neexistuje.</div>` : `
+    <div class="row"><select id="h-typ">${HIST_TYPES.map(t => `<option>${t}</option>`).join("")}</select><input type="date" id="h-next" value="${dLocal(f[CF.next])}" title="Ďalší kontakt"></div>
+    <textarea id="h-text" placeholder="Čo sa dohodlo" style="width:100%;margin-top:8px;min-height:70px;padding:10px 12px;font:inherit;font-size:16px;border:1px solid var(--border);border-radius:10px"></textarea>
+    <div class="muted" style="margin-top:4px">Dátum vpravo hore je ďalší kontakt.</div>
+    <button class="block" style="margin-top:8px" onclick="saveHist('${f.id}')">Uložiť záznam</button>`}
+    ${hist.map(x => `<div class="entry" style="display:block"><div class="muted">${x.Datum ? fmtD(dLocal(x.Datum)) : ""} · ${esc(x.Typ || "")} · ${esc(x.Autor || "")}</div><div style="white-space:pre-wrap">${esc(x.Text || "")}</div></div>`).join("")}
+    ${f[CF.notes] ? `<details style="margin-top:10px"><summary class="muted" style="cursor:pointer">Staršie poznámky</summary><div style="white-space:pre-wrap;margin-top:6px">${esc(f[CF.notes])}</div></details>` : ""}</div>`;
+  el.innerHTML = h;
+}
+async function saveHist(fid){
+  const f = firmById(fid), text = $("h-text").value.trim(), typ = $("h-typ").value, next = $("h-next").value;
+  if (!text) return toast("Napíš, čo sa dohodlo");
+  await crmSave(async () => {
+    const x = await Lists.create(LIST.hist, { Title:f[CF.name], FirmaId:Number(fid), Datum:dWrite(todayISO()), Typ:typ, Text:text, Autor:S.userName || S.user });
+    C.hist.push(x);
+    const upd = { [CF.lastContact]:dWrite(todayISO()), [CF.next]:dWrite(next) };
+    Object.assign(f, await Lists.update(LIST.firmy, fid, upd));
+  }, "Záznam uložený");
+}
+
+/* ÚPRAVA / NOVÁ FIRMA */
+function renderCrmEdit(){
+  const el = $("screen-crm-edit"); if (!crmGuard(el, renderCrmEdit)) return;
+  const isNew = C.edit === "new", f = isNew ? { [CF.status]:"Lead", [CF.owner]:C.owner || "" } : firmById(C.edit);
+  const inp = (k, l, type = "text") => `<label>${l}</label><input type="${type}" id="e-${k}" value="${esc(type === "date" ? dLocal(f[CF[k]]) : f[CF[k]] || "")}">`;
+  const sel = (k, l, opts) => `<label>${l}</label><select id="e-${k}" style="width:100%"><option value=""></option>${opts.map(o => `<option ${o === f[CF[k]] ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  el.innerHTML = `<div class="title"><button class="link" style="padding-left:0" onclick="go(${isNew ? "'crm-firmy'" : "'crm-firma'"})">‹ Späť</button></div>
+    <div class="card"><h3>${isNew ? "Nová firma" : "Upraviť firmu"}</h3>${inp("name", "Názov")}${inp("ico", "IČO")}
+    ${sel("status", "Stav", STATUS)}${sel("owner", "Vlastník", optionsOf(CF.owner, ["Hrusovsky","Eichler","Saska","Matus","Bobule"]))}${inp("next", "Ďalší kontakt", "date")}
+    ${sel("weight", "Váha klienta", optionsOf(CF.weight))}${sel("area", "Oblasť pôsobenia", optionsOf(CF.area))}${sel("pricelist", "Cenník", optionsOf(CF.pricelist))}
+    ${sel("source", "Zdroj", optionsOf(CF.source, ["Ziwell klient","Translata klient","Web","Referencia","Networking"]))}${inp("distributor", "Distribútor")}
+    ${inp("address", "Adresa")}${inp("city", "Mesto")}
+    <button class="block" onclick="saveFirm()">Uložiť</button></div>`;
+}
+async function saveFirm(){
+  const isNew = C.edit === "new", keys = ["name","ico","status","owner","next","weight","area","pricelist","source","distributor","address","city"], fields = {};
+  keys.forEach(k => { const v = $("e-" + k).value.trim(); fields[CF[k]] = k === "next" ? dWrite(v) : (v || null); });
+  if (!fields[CF.name]) return toast("Zadaj názov");
+  await crmSave(async () => {
+    if (isNew) { const x = await Lists.create(LIST.firmy, fields); C.firmy.push(x); C.open = x.id; }
+    else Object.assign(firmById(C.edit), await Lists.update(LIST.firmy, C.edit, fields));
+    S.screen = "crm-firma";
+  }, "Uložené");
+  go("crm-firma");
+}
+
+/* KONTAKTY */
+function renderCrmKontakty(){
+  const el = $("screen-crm-kontakty"); if (!crmGuard(el, renderCrmKontakty)) return;
+  const q = norm(C.kq);
+  const list = C.kontakty.map(k => ({ k, f:firmsOfContact(k) })).filter(({ k, f }) => !q || norm([kName(k), k.field_3, k.field_5, telOf(k), ...f.map(x => x[CF.name])].join(" ")).includes(q))
+    .sort((a, b) => (a.k.Title || "").localeCompare(b.k.Title || "", "sk"));
+  el.innerHTML = `<div class="bar"><input type="text" placeholder="Hľadať meno, firmu, e-mail" value="${esc(C.kq)}" oninput="C.kq=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmKontakty();const i=document.querySelector('#screen-crm-kontakty input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
+    <div class="card">${list.map(({ k, f }) => { const tel = telOf(k);
+      return `<div class="mv" onclick="${f[0] ? `C.back='crm-kontakty';openFirm('${f[0].id}')` : `C.kedit='${k.id}';C.kfirm=null;go('crm-kedit')`}"><div class="l"><b>${esc(kName(k))}</b>
+      <div class="muted">${[k.field_5, f.map(x => x[CF.name]).join(", ")].filter(Boolean).map(esc).join(" · ")}</div>
+      <div>${tel ? `<a href="tel:${tel.replace(/\s/g, "")}" onclick="event.stopPropagation()">${esc(tel)}</a>` : ""}${tel && k.field_3 ? " · " : ""}${k.field_3 ? `<a href="mailto:${esc(k.field_3)}" onclick="event.stopPropagation()">${esc(k.field_3)}</a>` : ""}</div></div></div>`; }).join("") || `<div class="empty">Nič sa nenašlo.</div>`}</div>`;
+}
+function renderCrmKedit(){
+  const el = $("screen-crm-kedit"); if (!crmGuard(el, renderCrmKedit)) return;
+  const isNew = C.kedit === "new", k = isNew ? {} : contactById(C.kedit);
+  const inp = (id, l, v, type = "text") => `<label>${l}</label><input type="${type}" id="k-${id}" value="${esc(v || "")}">`;
+  el.innerHTML = `<div class="title"><button class="link" style="padding-left:0" onclick="go(C.kfirm ? 'crm-firma' : 'crm-kontakty')">‹ Späť</button></div>
+    <div class="card"><h3>${isNew ? "Nový kontakt" : "Upraviť kontakt"}</h3>${inp("first", "Meno", k.field_1)}${inp("last", "Priezvisko", k.Title)}
+    ${inp("tel", "Telefón", telOf(k), "tel")}${inp("email", "E-mail", k.field_3, "email")}${inp("email2", "E-mail 2", k.field_4, "email")}
+    ${inp("pos", "Pozícia", k.field_5)}${inp("note", "Poznámka", k.field_6)}
+    <button class="block" onclick="saveContact()">Uložiť</button></div>`;
+}
+async function saveContact(){
+  const isNew = C.kedit === "new", v = id => $("k-" + id).value.trim() || null;
+  const fields = { Title:v("last"), field_1:v("first"), Telefon:v("tel"), field_3:v("email"), field_4:v("email2"), field_5:v("pos"), field_6:v("note") };
+  if (!fields.Title && !fields.field_1) return toast("Zadaj meno");
+  if (!fields.Title) { fields.Title = fields.field_1; fields.field_1 = null; }
+  await crmSave(async () => {
+    if (isNew) {
+      const x = await Lists.create(LIST.kontakty, fields); C.kontakty.push(x);
+      if (C.kfirm) { const f = firmById(C.kfirm), ids = [...(f.Contacts || []).map(c => Number(c.LookupId)), Number(x.id)];
+        await Lists.update(LIST.firmy, C.kfirm, { "ContactsLookupId@odata.type":"Collection(Edm.Int32)", ContactsLookupId:ids });
+        f.Contacts = ids.map(i => ({ LookupId:i })); }
+    } else Object.assign(contactById(C.kedit), await Lists.update(LIST.kontakty, C.kedit, fields));
+  }, "Kontakt uložený");
+  go(C.kfirm ? "crm-firma" : "crm-kontakty");
+}
+
+/* ukážkové dáta CRM (vymyslené) */
+function seedCrm(){
+  const kontakty = [{ id:"1", Title:"Nováková", field_1:"Jana", field_2:902111222, field_3:"jana@alfa.sk", field_5:"Nákup" },
+    { id:"2", Title:"Horváth", field_1:"Peter", field_2:905333444, field_5:"Konateľ" }];
+  const t = todayISO();
+  const firmy = [{ id:"10", Title:"Firma Alfa s.r.o.", field_11:"Deal", Owner:"Hrusovsky", field_3:"Key Account", field_4:"Retail", field_8:"Bratislava", field_9:dWrite(addDays(t, -2)), field_10:"Stretnutie v júli, chcú vzorky.", Contacts:[{ LookupId:1 }] },
+    { id:"11", Title:"Bistro Beta", field_11:"Lead", Owner:"Eichler", field_3:"Small Account", field_4:"Bistro", field_8:"Nitra", field_9:dWrite(t), Contacts:[{ LookupId:2 }] },
+    { id:"12", Title:"Gama Retail a.s.", field_11:"No Lead", Owner:"Hrusovsky", field_8:"Košice" }];
+  return { [LIST.firmy]:firmy, [LIST.kontakty]:kontakty, [LIST.hist]:[{ id:"100", FirmaId:10, Datum:dWrite(addDays(t, -10)), Typ:"Hovor", Text:"Dohodnuté vzorky.", Autor:"demo" }] };
+}
+
 /* ---------- NASTAVENIA ---------- */
 function renderNastavenia(){
   const el = $("screen-nastavenia");
-  let h = `<div class="title"><h2>Nastavenia</h2><button class="link" onclick="go('prehlad')">Späť</button></div>`;
+  let h = `<div class="title"><h2>Nastavenia</h2><button class="link" onclick="setMode(isCrm(S.lastCrm||'')&&S.modeBeforeSettings==='crm'?'crm':'sklad')">Späť</button></div>`;
   h += `<div class="card"><h3>Nápoje</h3><p class="muted" style="margin-top:0">„Názov v exporte“ musí sedieť s názvom v synchronizácii (sync/mapping.json).</p>`;
   drinks(true).forEach(d => {
     h += `<div class="entry" style="display:block"><div class="row"><div><label>Názov</label><input type="text" value="${esc(d.name)}" onchange="setDrink('${d.id}','name',this.value)"></div>
@@ -706,7 +982,7 @@ function seedDemoSales(){
 async function spustit(){
   $("auth-gate").style.display = "none"; $("app-loading").style.display = "flex";
   try {
-    S.user = DEMO ? "demo" : (account.username || account.name || "");
+    S.user = DEMO ? "demo" : (account.username || account.name || ""); S.userName = DEMO ? "demo" : (account.name || account.username || "");
     if (DEMO && !(await DemoStore.load(FILE_SALES)).data) await DemoStore.save(FILE_SALES, seedDemoSales());
     await loadAll();
     $("app-loading").style.display = "none"; $("app-root").style.display = "block";
