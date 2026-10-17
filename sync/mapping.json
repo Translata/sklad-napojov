@@ -263,5 +263,10 @@
       }
     },
     "_poznamkaMixed": "Zmiešané balenia v Shoptete: kód -> plechovky na 1 kus (460 = Izotonický Mix 6 ks)."
-  }
+  },
+  "shopifyLocations": {
+    "Piestany": "ppp",
+    "GSO": "gso"
+  },
+  "_poznamkaLocations": "Lokalita v Shopify, z ktorej bola objednávka odoslaná -> miesto v appke (ppp/gso). Neznáma lokalita = ppp."
 }

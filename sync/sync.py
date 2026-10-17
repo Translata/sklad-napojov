@@ -28,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -48,6 +48,7 @@ query($q: String!, $after: String) {
       name createdAt cancelledAt
       billingAddress { company name }
       customer { displayName }
+      fulfillments { status location { name } }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
         nodes { id title currentQuantity variant { id } }
@@ -176,6 +177,7 @@ def shopify_lines(mapping, since):
         for v in p["variants"]:
             variants[v["shopifyVariantId"]] = (dict(v["cans"]), "B2C")
     ignore = set(mapping.get("ignorovat", []))
+    locations = mapping.get("shopifyLocations", {})
 
     agg = defaultdict(int)
     unmapped = defaultdict(int)
@@ -202,6 +204,9 @@ def shopify_lines(mapping, since):
             n_orders += 1
             day = local_day(o["createdAt"])
             # odberateľ: firma z fakturačnej adresy, inak meno zo zákazníckeho profilu, inak meno vo fakturačnej adrese
+            # miesto odoslania podľa lokality v Shopify (mapping.json shopifyLocations); neodoslané = PPP
+            sent = [f for f in o.get("fulfillments") or [] if f["status"] == "SUCCESS" and f.get("location")]
+            loc = locations.get(sent[-1]["location"]["name"], "ppp") if sent else "ppp"
             bill = o.get("billingAddress") or {}
             company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
                 or (bill.get("name") or "").strip() or PRIVATE
@@ -215,14 +220,14 @@ def shopify_lines(mapping, since):
                     continue
                 cans, kind = variants[vid]
                 for name, n in cans.items():
-                    agg[(day, name, kind)] += n * qty
-                    per_order[(o["name"], day, company, kind, name)] += n * qty
+                    agg[(day, name, kind, loc)] += n * qty
+                    per_order[(o["name"], day, company, kind, name, loc)] += n * qty
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
-    lines = [{"d": d, "k": k, "t": t, "q": q} for (d, k, t), q in sorted(agg.items()) if q]
-    orders = [{"o": o, "d": d, "c": c, "t": t, "k": k, "q": q} for (o, d, c, t, k), q in sorted(per_order.items()) if q]
+    lines = [{"d": d, "k": k, "t": t, "loc": l, "q": q} for (d, k, t, l), q in sorted(agg.items()) if q]
+    orders = [{"o": o, "d": d, "c": c, "t": t, "k": k, "loc": l, "q": q} for (o, d, c, t, k, l), q in sorted(per_order.items()) if q]
     return lines, dict(unmapped), n_orders, orders
 
 
@@ -245,6 +250,36 @@ def graph():
     return _graph
 
 
+def download_previous():
+    g = graph()
+    req = urllib.request.Request(g["url"], headers=g["auth"])
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        sys.exit(f"HTTP {e.code} pri čítaní predchádzajúceho {TARGET}")
+
+
+def keep_old_shopify(order_lines, prev, today):
+    """Shopify API bez oprávnenia read_all_orders vracia len posledných 60 dní. Staršie objednávky,
+    ktoré už API nevráti, sa prenesú z predchádzajúceho súboru."""
+    if not prev:
+        return order_lines, 0
+    current = {l["o"] for l in order_lines}
+    cutoff = (today - timedelta(days=55)).isoformat()
+    old = [l for l in prev.get("shopifyOrders", []) if l["o"] not in current and l["d"] < cutoff]
+    return sorted(order_lines + old, key=lambda l: (l["d"], l["o"])), len({l["o"] for l in old})
+
+
+def aggregate_shopify(order_lines):
+    agg = defaultdict(int)
+    for l in order_lines:
+        agg[(l["d"], l["k"], l["t"], l.get("loc", "ppp"))] += l["q"]
+    return [{"d": d, "k": k, "t": t, "loc": loc, "q": q} for (d, k, t, loc), q in sorted(agg.items()) if q]
+
+
 def upload(data):
     g = graph()
     http(g["url"], data=json.dumps(data, ensure_ascii=False).encode(), method="PUT",
@@ -263,6 +298,14 @@ def main():
     use_graph = not a.no_upload and bool(os.environ.get("GRAPH_CLIENT_SECRET"))
     sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
     sf_lines, sf_unmapped, sf_orders, sf_order_lines = shopify_lines(mapping, a.since)
+    if use_graph:
+        prev = download_previous()
+    elif a.out and Path(a.out).exists():
+        prev = json.loads(Path(a.out).read_text())
+    else:
+        prev = None
+    sf_order_lines, kept = keep_old_shopify(sf_order_lines, prev, datetime.now(TZ).date())
+    sf_lines = aggregate_shopify(sf_order_lines)
     data = {
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "since": a.since,
@@ -276,6 +319,7 @@ def main():
     direct = sum(l["q"] for l in sh_lines if not l["gso"])
     print(f"Od {a.since}: Shoptet {sh_orders} objednávok (GSO {gso} ks, priamo {direct} ks), "
           f"Shopify {sf_orders} objednávok ({sum(l['q'] for l in sf_lines)} ks)")
+    print(f"Shopify staršie ako 60 dní (z predchádzajúceho súboru): {kept} objednávok")
     print(f"Nesledované položky: Shoptet {len(sh_unmapped)}, Shopify {len(sf_unmapped)}")
 
     if a.out:
