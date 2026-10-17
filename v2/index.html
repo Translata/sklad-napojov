@@ -132,6 +132,10 @@
   .mv{display:flex; justify-content:space-between; gap:10px; padding:11px 0; border-bottom:1px solid var(--line); cursor:pointer;}
   .mv:last-child{border-bottom:none;} .mv .l{min-width:0;} .mv .r{white-space:nowrap; font-weight:700; font-variant-numeric:tabular-nums;}
   .mv .r.plus{color:var(--ok);} .mv .r.minus{color:var(--text);} .mv .r.bad{color:var(--danger);}
+  .mv .r.withsel{display:flex; align-items:center; gap:8px;}
+  select.locsel{padding:4px 24px 4px 10px; font-size:13px; font-weight:700; border-radius:999px; background-position:right 8px center; min-height:0;}
+  select.locsel.ppp{background-color:#eef2ff; color:#1d4ed8; border-color:#c7d2fe;}
+  select.locsel.gso{background-color:#fff7ed; color:#c2410c; border-color:#fed7aa;}
   .mv-det{padding:0 0 12px; border-bottom:1px solid var(--line);}
   .demo{background:var(--warn-soft); color:var(--warn); text-align:center; font-size:12px; padding:4px;}
 </style>
@@ -181,7 +185,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v7.1";
+const APP_VERSION = "v7.2";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -601,12 +605,12 @@ function renderPohyby(){
     const open = S.pOpen === e.key, names = Object.entries(e.items).map(([id, n]) => `${esc(drinkById(id).name)} ${e.kind === "inv" ? fmtS(n) : fmtN(n)}`).join(", ");
     const cls = e.kind === "inv" ? (e.total < 0 ? "bad" : e.total > 0 ? "plus" : "") : e.sign > 0 ? "plus" : "minus";
     h += `<div class="mv" onclick="S.pOpen=${open ? "null" : `'${esc(e.key)}'`};renderPohyby()"><div class="l"><b>${esc(e.title)}</b>${e.sub ? ` · ${esc(e.sub)}` : ""}
-      <div class="muted">${fmtDs(e.date)}${e.loc ? " · " + LOCS[e.loc] : ""}${names && !open ? " · " + names : ""}</div></div>
-      <div class="r ${cls}">${e.kind === "inv" ? (e.total ? fmtS(e.total) : "sedí") : e.kind === "presun" ? fmtN(e.qty) : (e.sign > 0 ? "+" : "−") + fmtN(Math.abs(e.total))}</div></div>`;
+      <div class="muted">${fmtDs(e.date)}${e.loc && e.kind !== "shopify" ? " · " + LOCS[e.loc] : ""}${names && !open ? " · " + names : ""}</div></div>
+      <div class="r ${cls}${e.kind === "shopify" ? " withsel" : ""}">${e.kind === "shopify" ? `<select class="locsel ${e.loc}" onclick="event.stopPropagation()" onchange="setShopifyLoc('${esc(e.order)}',this.value)">${Object.entries(LOCS).map(([k, l]) =>
+        `<option value="${k}" ${k === e.loc ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}${e.kind === "inv" ? (e.total ? fmtS(e.total) : "sedí") : e.kind === "presun" ? fmtN(e.qty) : (e.sign > 0 ? "+" : "−") + fmtN(Math.abs(e.total))}</div></div>`;
     if (open) h += `<div class="mv-det">${e.kind === "inv" ? invTable(e.count).replace(/^<div class="card">|<\/div>$/g, "")
       : Object.entries(e.items).map(([id, n]) => ln(esc(drinkById(id).name), fmtN(n))).join("")}
-      ${e.kind === "shopify" ? `<div style="display:flex;align-items:center;gap:10px;margin-top:8px"><span class="muted">Odoslané z</span><div class="seg" style="margin:0;flex:1">${Object.entries(LOCS).map(([k, l]) =>
-        `<button class="${k === e.loc ? "on" : ""}" onclick="event.stopPropagation();setShopifyLoc('${esc(e.order)}','${k}')">${l}</button>`).join("")}</div></div>` : ""}
+
       ${e.del ? `<button class="del" style="padding-left:0;margin-top:6px" onclick="event.stopPropagation();${e.del}">Zmazať</button>` : ""}</div>`;
   });
   el.innerHTML = h + `</div>` + syncInfo();
