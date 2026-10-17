@@ -181,7 +181,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v7.0";
+const APP_VERSION = "v7.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -217,6 +217,7 @@ const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLow
 function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
 const emptyData = () => ({ version:7, drinks:[], receipts:[], counts:[], outs:[], transfers:[], beforeCount:{} });
 function normalize(d){ ["drinks","receipts","counts","outs","transfers"].forEach(k => d[k] = d[k] || []); d.beforeCount = d.beforeCount || {};
+  d.shopifyLoc = d.shopifyLoc || {};
   // rozdané z v3 sú propagácia na účet GSO
   (d.giveaways || []).forEach(g => d.outs.push({ id:g.id, type:"propagacia", date:g.date, label:g.event, items:g.items, by:g.by, at:g.at }));
   delete d.giveaways;
@@ -236,7 +237,9 @@ function salesFor(){
   // objednávka odoslaná v deň inventúry ešte pred počítaním patrí do predchádzajúceho obdobia
   (s.shoptet || []).forEach(l => { const id = byKey[norm(l.k)];
     if (id) sh.push({ ...l, d:S.data.beforeCount[l.o] ? addDays(l.d, -1) : l.d, drinkId:id }); });
-  (s.shopify || []).forEach(l => { const id = byKey[norm(l.k)]; if (id) sf.push({ ...l, drinkId:id }); });
+  // Shopify po objednávkach; miesto odoslania sa nastavuje ručne v Pohyboch (predvolené PPP)
+  (s.shopifyOrders || s.shopify || []).forEach(l => { const id = byKey[norm(l.k)];
+    if (id) sf.push({ ...l, loc:S.data.shopifyLoc[l.o] || "ppp", drinkId:id }); });
   return { sh, sf };
 }
 
@@ -571,7 +574,7 @@ function movements(from, to){
   E.push(...Object.values(sh));
   const byKey = {}; S.data.drinks.forEach(d => { byKey[norm(d.key)] = d.id; });
   const sf = {}; ((S.sales || {}).shopifyOrders || []).filter(l => inP(l.d) && byKey[norm(l.k)]).forEach(l => {
-    const x = sf[l.o] = sf[l.o] || { key:"f" + l.o, kind:"shopify", date:l.d, title:`Shopify ${l.o}`, sub:l.c, loc:l.loc || "ppp", items:{}, sign:-1 };
+    const x = sf[l.o] = sf[l.o] || { key:"f" + l.o, kind:"shopify", date:l.d, title:`Shopify ${l.o}`, sub:l.c, loc:S.data.shopifyLoc[l.o] || "ppp", order:l.o, items:{}, sign:-1 };
     x.items[byKey[norm(l.k)]] = (x.items[byKey[norm(l.k)]] || 0) + l.q; });
   E.push(...Object.values(sf));
   S.data.transfers.filter(t => inP(t.date)).forEach(t => E.push({ key:"t" + t.id, kind:"presun", date:t.date, title:`Presun ${LOCS[t.from]} → ${LOCS[t.to]}`,
@@ -602,9 +605,14 @@ function renderPohyby(){
       <div class="r ${cls}">${e.kind === "inv" ? (e.total ? fmtS(e.total) : "sedí") : e.kind === "presun" ? fmtN(e.qty) : (e.sign > 0 ? "+" : "−") + fmtN(Math.abs(e.total))}</div></div>`;
     if (open) h += `<div class="mv-det">${e.kind === "inv" ? invTable(e.count).replace(/^<div class="card">|<\/div>$/g, "")
       : Object.entries(e.items).map(([id, n]) => ln(esc(drinkById(id).name), fmtN(n))).join("")}
+      ${e.kind === "shopify" ? `<div style="display:flex;align-items:center;gap:10px;margin-top:8px"><span class="muted">Odoslané z</span><div class="seg" style="margin:0;flex:1">${Object.entries(LOCS).map(([k, l]) =>
+        `<button class="${k === e.loc ? "on" : ""}" onclick="event.stopPropagation();setShopifyLoc('${esc(e.order)}','${k}')">${l}</button>`).join("")}</div></div>` : ""}
       ${e.del ? `<button class="del" style="padding-left:0;margin-top:6px" onclick="event.stopPropagation();${e.del}">Zmazať</button>` : ""}</div>`;
   });
   el.innerHTML = h + `</div>` + syncInfo();
+}
+async function setShopifyLoc(o, loc){
+  await mutate(() => { if (loc === "ppp") delete S.data.shopifyLoc[o]; else S.data.shopifyLoc[o] = loc; }, `${o}: odoslané z ${LOCS[loc]}`);
 }
 async function delPresun(id){
   if (!confirm("Zmazať tento presun?")) return;
