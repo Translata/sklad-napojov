@@ -23,6 +23,13 @@
   header .right{display:flex; gap:6px;}
   .link{background:none; color:var(--accent); padding:6px 8px; font-size:14px; font-weight:600;}
   main{padding:14px 12px; max-width:720px; margin:0 auto;}
+  main.wide{max-width:none;}
+  .kanban{display:flex; gap:10px; overflow-x:auto; align-items:flex-start; padding-bottom:8px; margin:0 -12px; padding-left:12px; padding-right:12px;}
+  .kcol{flex:0 0 260px; background:#e9ebef; border-radius:12px; padding:8px; min-height:120px;}
+  .kcol.over{background:#dbe4ff;}
+  .khead{display:flex; justify-content:space-between; align-items:center; padding:4px 4px 8px; font-weight:700; font-size:14px;}
+  .kcard{background:#fff; border-radius:10px; padding:10px; margin-bottom:8px; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer;}
+  .kcard:active{opacity:.7;}
   .title{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:4px 4px 12px;}
   .title h2{font-size:22px; margin:0; letter-spacing:-.02em;}
   .title .muted{text-align:right;}
@@ -202,7 +209,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v8.0";
+const APP_VERSION = "v8.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -416,6 +423,7 @@ function go(s){
   if (s !== "nastavenia") { if (isCrm(s)) S.lastCrm = NAV_OF[s] || s; else S.lastSklad = s; }
   if (s === "crm-firmy" || s === "crm-dnes") C.back = s;
   S.screen = s;
+  document.querySelector("main").classList.remove("wide");
   const crm = isCrm(s);
   $("nav-sklad").style.display = crm ? "none" : "flex"; $("nav-crm").style.display = crm ? "flex" : "none";
   document.querySelectorAll("#mode-sw button").forEach(b => b.classList.toggle("on", b.dataset.m === (crm ? "crm" : "sklad")));
@@ -772,18 +780,51 @@ function renderCrmDnes(){
 }
 
 /* FIRMY */
+/* FIRMY: zoznam so zoskupovaním alebo kanban; v kanbane sa firma presúva medzi stĺpcami ťahaním (mení zoskupené pole) */
+const GROUPS = [["status","Stav"],["owner","Vlastník"],["weight","Váha klienta"],["area","Oblasť"],["city","Mesto"],["pricelist","Cenník"],["source","Zdroj"],["none","Bez zoskupenia"]];
+try { C.view = localStorage.getItem("crm_view") || "list"; C.group = localStorage.getItem("crm_group") || "status"; } catch(e){ C.view = "list"; C.group = "status"; }
+function groupFirms(list, key){
+  if (key === "none") return [["", list]];
+  const field = CF[key], g = {};
+  list.forEach(f => { const v = f[field] || ""; (g[v] = g[v] || []).push(f); });
+  if (key === "status") STATUS.forEach(s => { g[s] = g[s] || []; });
+  const order = key === "status" ? s => { const i = STATUS.indexOf(s); return i < 0 ? 99 : i; } : null;
+  return Object.entries(g).sort((a, b) => !a[0] ? 1 : !b[0] ? -1 : order ? order(a[0]) - order(b[0]) : a[0].localeCompare(b[0], "sk"));
+}
 function renderCrmFirmy(){
   const el = $("screen-crm-firmy"); if (!crmGuard(el, renderCrmFirmy)) return;
-  const q = norm(C.q);
+  const q = norm(C.q), kan = C.view === "kanban";
+  if (kan && C.group === "none") C.group = "status";
+  document.querySelector("main").classList.toggle("wide", kan);
   const list = C.firmy.filter(f => (!C.status || f[CF.status] === C.status) && (!C.owner || f[CF.owner] === C.owner)
     && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)))
     .sort((a, b) => (a[CF.name] || "").localeCompare(b[CF.name] || "", "sk"));
-  let h = `<div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.q)}" oninput="C.q=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirmy();const i=document.querySelector('#screen-crm-firmy input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
-    <div class="bar"><select onchange="C.status=this.value;renderCrmFirmy()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.status ? "selected" : ""}>${s}</option>`).join("")}</select>
-    ${ownerSelect("renderCrmFirmy")}<button class="small" style="margin-left:auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
-    <div class="card">${list.length ? list.map(firmRow).join("") : `<div class="empty">Nič sa nenašlo.</div>`}</div>
-    <p class="muted" style="text-align:center">${list.length} z ${C.firmy.length}</p>`;
-  el.innerHTML = h;
+  const save = (k, v) => `C.${k}=this.value;try{localStorage.setItem('crm_${k}',this.value)}catch(e){};renderCrmFirmy()`;
+  let h = `<div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.q)}" oninput="C.q=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirmy();const i=document.querySelector('#screen-crm-firmy input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)">
+    <button class="small" style="flex:0 0 auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
+    <div class="bar" style="flex-wrap:wrap"><div class="seg" style="margin:0">${[["list","Zoznam"],["kanban","Kanban"]].map(([k, l]) =>
+      `<button class="${k === C.view ? "on" : ""}" onclick="C.view='${k}';try{localStorage.setItem('crm_view','${k}')}catch(e){};renderCrmFirmy()">${l}</button>`).join("")}</div>
+    <select onchange="${save("group")}">${GROUPS.filter(([k]) => !(kan && k === "none")).map(([k, l]) => `<option value="${k}" ${k === C.group ? "selected" : ""}>${kan ? "Stĺpce" : "Skupiny"}: ${l}</option>`).join("")}</select>
+    ${C.group === "status" ? "" : `<select onchange="C.status=this.value;renderCrmFirmy()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.status ? "selected" : ""}>${s}</option>`).join("")}</select>`}
+    ${C.group === "owner" ? "" : ownerSelect("renderCrmFirmy")}</div>`;
+  const G = groupFirms(list, C.group), label = v => v || "(bez hodnoty)";
+  if (kan) {
+    h += `<div class="kanban">${G.map(([v, fs]) => `<div class="kcol" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
+      ondrop="this.classList.remove('over');dropFirm(event,'${esc(v)}')"><div class="khead">${C.group === "status" ? statusChip(v) || label(v) : esc(label(v))}<span class="muted">${fs.length}</span></div>
+      ${fs.map(f => `<div class="kcard" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${f.id}')" onclick="openFirm('${f.id}')">
+        <b>${esc(f[CF.name])}</b><div class="muted">${[f[CF.city], C.group === "owner" ? f[CF.status] : f[CF.owner]].filter(Boolean).map(esc).join(" · ")}</div>${nextBadge(f)}</div>`).join("")}</div>`).join("")}</div>
+      <p class="muted" style="text-align:center">Na počítači presunieš firmu do iného stĺpca ťahaním.</p>`;
+  } else {
+    h += G.filter(([, fs]) => fs.length).map(([v, fs]) => `<div class="card">${C.group === "none" ? "" : `<h3>${C.group === "status" ? statusChip(v) || label(v) : esc(label(v))} <span class="muted" style="text-transform:none">· ${fs.length}</span></h3>`}
+      ${fs.map(firmRow).join("")}</div>`).join("") || `<div class="card empty">Nič sa nenašlo.</div>`;
+  }
+  el.innerHTML = h + `<p class="muted" style="text-align:center">${list.length} z ${C.firmy.length}</p>`;
+}
+async function dropFirm(ev, value){
+  ev.preventDefault();
+  const id = ev.dataTransfer.getData("text/plain"), f = firmById(id), field = CF[C.group];
+  if (!f || (f[field] || "") === value) return;
+  await crmSave(async () => { Object.assign(f, await Lists.update(LIST.firmy, id, { [field]:value || null })); }, `${f[CF.name]}: ${value || "bez hodnoty"}`);
 }
 
 /* predaje firmy zo skladových dát: Shoptet podľa IČO alebo názvu, Shopify podľa názvu */
