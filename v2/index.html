@@ -209,7 +209,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v8.2";
+const APP_VERSION = "v8.3";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -806,9 +806,10 @@ function renderCrmFirmy(){
     <button class="small" style="flex:0 0 auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
     <div class="bar" style="flex-wrap:wrap"><div class="seg" style="margin:0">${[["list","Zoznam"],["kanban","Kanban"]].map(([k, l]) =>
       `<button class="${k === C.view ? "on" : ""}" onclick="C.view='${k}';try{localStorage.setItem('crm_view','${k}')}catch(e){};renderCrmFirmy()">${l}</button>`).join("")}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto">
     <select onchange="${save("group")}">${GROUPS.filter(([k]) => !(kan && k === "none")).map(([k, l]) => `<option value="${k}" ${k === C.group ? "selected" : ""}>${kan ? "Stĺpce" : "Skupiny"}: ${l}</option>`).join("")}</select>
     ${C.group === "status" ? "" : `<select onchange="C.status=this.value;renderCrmFirmy()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.status ? "selected" : ""}>${s}</option>`).join("")}</select>`}
-    ${C.group === "owner" ? "" : ownerSelect("renderCrmFirmy")}</div>`;
+    ${C.group === "owner" ? "" : ownerSelect("renderCrmFirmy")}</div></div>`;
   const G = groupFirms(list, C.group), label = v => v || "(bez hodnoty)";
   if (kan) {
     h += `<div class="kanban">${G.map(([v, fs]) => `<div class="kcol" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
