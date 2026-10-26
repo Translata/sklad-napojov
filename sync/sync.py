@@ -79,6 +79,10 @@ def env(name, required=True):
     return v
 
 
+class FetchError(Exception):
+    pass
+
+
 def http(url, data=None, headers=None, method=None):
     req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
     # bez query stringu, odkazy môžu obsahovať tajné hashe
@@ -88,11 +92,15 @@ def http(url, data=None, headers=None, method=None):
             with urllib.request.urlopen(req, timeout=90) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")[:300]
-            sys.exit(f"HTTP {e.code} z {where}: {body}")
+            # dočasné blokovanie alebo výpadok servera: skúsiť znova o chvíľu
+            if e.code in (403, 429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(30 * (attempt + 1))
+                continue
+            body = e.read().decode("utf-8", "replace")[:200]
+            raise FetchError(f"HTTP {e.code} z {where}: {body}")
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             if attempt == 3:
-                sys.exit(f"Spojenie s {where.split('/')[2]} zlyhalo: {getattr(e, 'reason', e)}")
+                raise FetchError(f"Spojenie s {where.split('/')[2]} zlyhalo: {getattr(e, 'reason', e)}")
             time.sleep(10 * (attempt + 1))
 
 
@@ -296,18 +304,30 @@ def main():
     mapping = json.loads((HERE / "mapping.json").read_text())
 
     use_graph = not a.no_upload and bool(os.environ.get("GRAPH_CLIENT_SECRET"))
-    sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
-    sf_lines, sf_unmapped, sf_orders, sf_order_lines = shopify_lines(mapping, a.since)
     if use_graph:
         prev = download_previous()
     elif a.out and Path(a.out).exists():
         prev = json.loads(Path(a.out).read_text())
     else:
         prev = None
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # ak Shoptet nedostupný, použijú sa jeho údaje z minulého behu a Shopify sa aktualizuje aj tak
+    try:
+        sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
+        sh_updated = now_iso
+    except FetchError as e:
+        if not prev or "shoptet" not in prev:
+            raise
+        print(f"::warning::Shoptet sa nepodarilo načítať ({str(e)[:80]}), ostávajú údaje z minulého behu.")
+        sh_lines, sh_unmapped = prev["shoptet"], prev.get("unmapped", {}).get("shoptet", {})
+        sh_orders = len({l["o"] for l in sh_lines})
+        sh_updated = prev.get("shoptetUpdatedAt", prev.get("updatedAt"))
+    sf_lines, sf_unmapped, sf_orders, sf_order_lines = shopify_lines(mapping, a.since)
     sf_order_lines, kept = keep_old_shopify(sf_order_lines, prev, datetime.now(TZ).date())
     sf_lines = aggregate_shopify(sf_order_lines)
     data = {
-        "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "updatedAt": now_iso,
+        "shoptetUpdatedAt": sh_updated,
         "since": a.since,
         "shoptet": sh_lines,
         "shopify": sf_lines,
@@ -333,4 +353,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except FetchError as e:
+        sys.exit(str(e))

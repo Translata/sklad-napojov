@@ -209,7 +209,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v8.3";
+const APP_VERSION = "v8.4";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -441,8 +441,10 @@ function renderAll(){
 const ln = (label, v, cls = "") => `<div class="ln ${cls}"><span>${label}</span><span class="v">${v}</span></div>`;
 function syncInfo(){
   if (!S.sales) return `<div class="note">Chýbajú predaje zo Shoptetu a Shopify.</div>`;
+  const fmt = d => d.toLocaleString("sk-SK", { day:"numeric", month:"numeric", hour:"2-digit", minute:"2-digit" });
   const t = new Date(S.sales.updatedAt), old = (Date.now() - t) / 36e5 > 36;
-  return `<p class="muted" style="margin:10px 4px;text-align:center;${old ? "color:var(--warn)" : ""}">Predaje k ${t.toLocaleString("sk-SK", { day:"numeric", month:"numeric", hour:"2-digit", minute:"2-digit" })}</p>`;
+  const sh = new Date(S.sales.shoptetUpdatedAt || S.sales.updatedAt), shOld = (Date.now() - sh) / 36e5 > 36;
+  return `<p class="muted" style="margin:10px 4px;text-align:center;${old || shOld ? "color:var(--warn)" : ""}">Predaje k ${fmt(t)}${shOld && !old ? ` · Shoptet len k ${fmt(sh)}` : ""}</p>`;
 }
 function onboarding(){
   return `<div class="card"><h3>Začíname</h3><p>Appka zatiaľ nemá žiadne dáta. Načítaj nápoje, príjmy a inventúry z pôvodnej appky.</p>
