@@ -209,7 +209,7 @@
    Mesačný prehľad je za kalendárny mesiac; faktúra GSO = Shopify + predaj mimo Shopify + propagácia.
    Automaticky (nočná synchronizácia, Sklad-app/predaje.json): Shoptet (PPP) a Shopify (GSO). */
 
-const APP_VERSION = "v8.4";
+const APP_VERSION = "v8.5";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -228,7 +228,7 @@ const OUT = {
   odpis:     { label:"Odpis", field:"Dôvod", ph:"napr. rozbité pri vykládke", gso:false, loc:"ppp" }
 };
 
-let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, entry:"prijem", pFilter:"all", pOpen:null, lastInv:null, loc:"all", outLoc:null, trFrom:"ppp" };
+let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, entry:"prijem", pFilter:"all", pOpen:null, lastInv:null, loc:"all", outLoc:null, trFrom:"ppp", invLoc:"ppp" };
 
 /* ---------- pomocné ---------- */
 const $ = id => document.getElementById(id);
@@ -276,28 +276,38 @@ function salesFor(){
 const MONTHS = ["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
 const monthName = ym => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
 const nextMonth = ym => { let [y, m] = ym.split("-").map(Number); m++; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, "0")}`; };
-/* loc = null: celý sklad (všetky inventúry, súčet miest); loc = "ppp"/"gso": jedno miesto od prvej inventúry po miestach */
+/* Kniha pohybov po miestach. Každé miesto (PPP, GSO) má vlastný stav a vlastné inventúry; celý sklad je ich súčet.
+   Staré inventúry bez rozdelenia sú počty v PPP. Miesto, ktoré sa pri prvej inventúre nápoja nepočítalo, začína s 0.
+   loc = null: celý sklad; loc = "ppp"/"gso": jedno miesto. */
+const countedAt = (c, l, id) => c.loc ? (c.loc[l] || {})[id] : (l === "ppp" ? c.counts[id] : undefined);
 function buildLedger(loc = null){
-  const sales = salesFor(), C = counts(), L = {};
-  const counted = (c, id) => loc ? (c.loc ? c.loc[loc][id] : undefined) : c.counts[id];
+  const sales = salesFor(), C = counts(), L = {}, locs = Object.keys(LOCS);
   S.data.drinks.forEach(d => {
-    const mv = [], add = (date, k, q, at) => { if (!loc || at === loc) mv.push({ date, k, q }); };
+    const mv = [], add = (date, k, q, at) => mv.push({ date, k, q, loc:at });
     S.data.receipts.forEach(r => { if (r.drinkId === d.id) add(r.date, "prod", r.qty, r.loc || "ppp"); });
     S.data.outs.forEach(o => { if (o.items[d.id]) add(o.date, o.type, -o.items[d.id], outLoc(o)); });
     sales.sh.forEach(x => { if (x.drinkId === d.id && !x.gso) add(x.d, "ppp", -x.q, "ppp"); });
     sales.sf.forEach(x => { if (x.drinkId === d.id) add(x.d, x.t === "B2C" ? "b2c" : "b2b", -x.q, x.loc || "ppp"); });
-    // presun medzi miestami mení len stav miest, nie celého skladu
-    if (loc) S.data.transfers.forEach(t => { const q = t.items[d.id]; if (!q) return;
-      if (t.from === loc) mv.push({ date:t.date, k:"tout", q:-q }); if (t.to === loc) mv.push({ date:t.date, k:"tin", q }); });
-    const first = C.find(c => counted(c, d.id) != null);
+    S.data.transfers.forEach(t => { const q = t.items[d.id]; if (!q) return; add(t.date, "tout", -q, t.from); add(t.date, "tin", q, t.to); });
+    const first = C.find(c => locs.some(l => countedAt(c, l, d.id) != null));
     if (!first) { L[d.id] = { start:null, mv:[], adj:[] }; return; }
-    const start = { date:first.date, qty:counted(first, d.id), countId:first.id };
-    const m = mv.filter(x => x.date >= start.date), adj = [];
-    C.filter(c => c.date > start.date && counted(c, d.id) != null).forEach(c => {
-      const book = start.qty + m.reduce((s, x) => s + (x.date < c.date ? x.q : 0), 0) + adj.reduce((s, a) => s + a.diff, 0);
-      adj.push({ date:c.date, countDate:c.date, countId:c.id, counted:counted(c, d.id), book, diff:counted(c, d.id) - book, note:(c.notes || {})[d.id] || "" });
+    const per = {};
+    locs.forEach(l => {
+      const q0 = countedAt(first, l, d.id) ?? 0, m = mv.filter(x => x.loc === l && x.date >= first.date), adj = [];
+      C.filter(c => c.date > first.date && countedAt(c, l, d.id) != null).forEach(c => {
+        const n = countedAt(c, l, d.id), book = q0 + m.reduce((s, x) => s + (x.date < c.date ? x.q : 0), 0) + adj.reduce((s, a) => s + a.diff, 0);
+        adj.push({ date:c.date, countDate:c.date, countId:c.id, counted:n, book, diff:n - book, note:(c.notes || {})[d.id] || "" });
+      });
+      per[l] = { start:{ date:first.date, qty:q0, countId:first.id }, mv:m, adj };
     });
-    L[d.id] = { start, mv:m, adj };
+    if (loc) { L[d.id] = per[loc]; return; }
+    // celý sklad: súčet miest; presuny medzi miestami sa navzájom rušia
+    const adj = {};
+    locs.forEach(l => per[l].adj.forEach(a => { const x = adj[a.countId] = adj[a.countId] || { ...a, counted:0, book:0, diff:0 };
+      x.counted += a.counted; x.book += a.book; x.diff += a.diff; }));
+    L[d.id] = { start:{ date:first.date, qty:locs.reduce((s, l) => s + per[l].start.qty, 0), countId:first.id },
+      mv:locs.flatMap(l => per[l].mv).filter(x => x.k !== "tin" && x.k !== "tout"),
+      adj:Object.values(adj).sort((a, b) => a.date.localeCompare(b.date)) };
   });
   return L;
 }
@@ -466,7 +476,6 @@ function renderPrehlad(){
   let h = `<div class="bar">${monthSelect("renderPrehlad")}${G.length > 1 ? `<div class="seg">${G.map(([g]) =>
     `<button class="${g === S.mGroup ? "on" : ""}" onclick="S.mGroup='${esc(g)}';S.mOpen=null;renderPrehlad()">${esc(g === G_LP ? "LP" : g)}</button>`).join("")}</div>` : ""}</div>
     <div class="seg">${[["all","Spolu"], ...Object.entries(LOCS)].map(([k, l]) => `<button class="${k === S.loc ? "on" : ""}" onclick="S.loc='${k}';S.mOpen=null;renderPrehlad()">${l}</button>`).join("")}</div>`;
-  if (loc && !ok.length) { el.innerHTML = h + `<div class="card empty">Stav podľa miest sa začne počítať od prvej inventúry na oboch miestach.</div>`; return; }
   if (ok.length) h += `<div class="card">${formula(sumR(ok), endLabel, loc)}</div>`;
   h += `<div class="card">`;
   rows.forEach(({ d, r }) => {
@@ -525,40 +534,55 @@ function renderZadat(){
   h += `<label ${E === "vydaj" || E === "presun" ? "" : `style="margin-top:0"`}>Dátum</label><input type="date" id="z-date" value="${todayISO()}">`;
   if (E !== "inv") h += `<label>${E === "vydaj" ? T.field : "Poznámka"}</label><input type="text" id="z-note" placeholder="${E === "vydaj" ? T.ph : "nepovinné"}">`;
   if (first) h += `<p class="muted">Počiatočná inventúra: vyplň všetky nápoje.</p>`;
+  if (E === "inv") h += `<label>Miesto</label><div class="seg" style="margin:0">${[["ppp","PPP"],["gso","GSO"],["both","Obe miesta"]].map(([k, l]) =>
+    `<button class="${k === S.invLoc ? "on" : ""}" onclick="S.invLoc='${k}';renderZadat()">${l}</button>`).join("")}</div>`;
   h += E === "inv" ? `<label>Napočítané</label>${qtyList2("z")}` : `<label>Počet</label>${qtyList("z")}`;
   h += `<button class="block" onclick="saveZadat()">Uložiť</button></div>`;
   if (E === "inv" && S.lastInv) h += invTable(S.data.counts.find(c => c.id === S.lastInv));
   el.innerHTML = h; if (E === "inv") qtyTotal2("z"); else qtyTotal("z");
 }
 /* inventúra: počet na každom mieste */
+const invLocs = () => S.invLoc === "both" ? Object.keys(LOCS) : [S.invLoc];
 function qtyList2(prefix){
-  let h = `<div class="qty"><div class="it" style="border:none;padding-bottom:0"><span></span>${Object.values(LOCS).map(l => `<b class="muted" style="width:80px;text-align:center">${l}</b>`).join("")}</div>`;
+  const ls = invLocs();
+  let h = `<div class="qty">${ls.length > 1 ? `<div class="it" style="border:none;padding-bottom:0"><span></span>${ls.map(l => `<b class="muted" style="width:80px;text-align:center">${LOCS[l]}</b>`).join("")}</div>` : ""}`;
   groups(drinks()).forEach(([g, list]) => {
     h += `<div class="grp">${esc(g)}</div>`;
-    list.forEach(d => { h += `<div class="it"><span>${esc(d.name)}</span>${Object.keys(LOCS).map(l =>
+    list.forEach(d => { h += `<div class="it"><span>${esc(d.name)}</span>${ls.map(l =>
       `<input type="number" inputmode="numeric" min="0" id="${prefix}-${l}-${d.id}" placeholder="–" style="width:80px" oninput="qtyTotal2('${prefix}')">`).join("")}</div>`; });
   });
   return h + `</div><div class="total"><span>Spolu</span><span class="num" id="${prefix}-total">0</span></div>`;
 }
-function qtyTotal2(prefix){ let t = 0; drinks().forEach(d => Object.keys(LOCS).forEach(l => { t += Number($(`${prefix}-${l}-${d.id}`).value) || 0; })); $(`${prefix}-total`).textContent = fmtN(t); }
+function qtyTotal2(prefix){ let t = 0; drinks().forEach(d => invLocs().forEach(l => { t += Number($(`${prefix}-${l}-${d.id}`).value) || 0; })); $(`${prefix}-total`).textContent = fmtN(t); }
 async function saveZadat(){
   const E = S.entry, date = $("z-date").value, note = $("z-note") ? $("z-note").value.trim() : "";
   if (!date) return toast("Zadaj dátum");
   if (E === "inv") {
-    const first = !S.data.counts.length, c = {}, byLoc = { ppp:{}, gso:{} };
-    for (const d of drinks()) {
-      const v = Object.keys(LOCS).map(l => $(`z-${l}-${d.id}`).value.trim());
-      if (v.every(x => x === "")) { if (first) return toast("Vyplň všetky nápoje"); continue; }
-      if (v.some(x => x === "")) return toast(`${d.name}: vyplň obe miesta (aj 0)`);
-      const n = v.map(x => Math.round(Number(x)));
-      if (n.some(x => !Number.isFinite(x) || x < 0)) return toast(`${d.name}: neplatný počet`);
-      byLoc.ppp[d.id] = n[0]; byLoc.gso[d.id] = n[1]; c[d.id] = n[0] + n[1];
+    // prázdne políčko = na tom mieste sa nápoj nepočítal; nula = napočítaná nula
+    const first = !S.data.counts.length, byLoc = {};
+    for (const d of drinks()) for (const l of invLocs()) {
+      const v = $(`z-${l}-${d.id}`).value.trim();
+      if (v === "") { if (first) return toast("Vyplň všetky nápoje"); continue; }
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n) || n < 0) return toast(`${d.name}: neplatný počet`);
+      (byLoc[l] = byLoc[l] || {})[d.id] = n;
     }
-    if (!Object.keys(c).length) return toast("Zadaj aspoň jeden nápoj");
-    if (S.data.counts.some(x => x.date === date)) return toast("Inventúra s týmto dátumom už existuje");
+    if (!Object.keys(byLoc).length) return toast("Zadaj aspoň jeden nápoj");
     if (counts()[0] && date < counts()[0].date) return toast("Dátum je pred počiatočnou inventúrou");
-    const id = uid();
-    if (await mutate(() => S.data.counts.push({ id, date, counts:c, loc:byLoc, ...stamp() }), "Inventúra uložená")) { S.lastInv = id; renderZadat(); }
+    const same = S.data.counts.find(x => x.date === date);
+    if (same && Object.keys(byLoc).some(l => same.loc && same.loc[l] && Object.keys(byLoc[l]).some(id => id in same.loc[l]))
+      && !confirm(`Inventúra z ${fmtD(date)} už má počty na tomto mieste. Prepísať ich?`)) return;
+    const id = same ? same.id : uid();
+    const ok = await mutate(() => {
+      // inventúra toho istého dňa sa dopĺňa (napr. PPP ráno, GSO neskôr)
+      const c = same || { id, date, counts:{}, loc:{}, ...stamp() };
+      if (!c.loc) c.loc = { ppp:{ ...c.counts } };
+      Object.entries(byLoc).forEach(([l, v]) => { c.loc[l] = { ...(c.loc[l] || {}), ...v }; });
+      c.counts = {};
+      Object.values(c.loc).forEach(v => Object.entries(v).forEach(([d, n]) => { c.counts[d] = (c.counts[d] || 0) + n; }));
+      if (!same) S.data.counts.push(c);
+    }, same ? "Inventúra doplnená" : "Inventúra uložená");
+    if (ok) { S.lastInv = id; renderZadat(); }
     return;
   }
   const q = qtyRead("z");
@@ -582,7 +606,7 @@ function invTable(c){
   if (c.loc) {
     const LL = Object.fromEntries(Object.keys(LOCS).map(l => [l, buildLedger(l)]));
     const cell = a => a ? `<td class="${diffCls(a.diff)}">${a.diff ? fmtS(a.diff) : "0"}</td>` : `<td class="muted">–</td>`;
-    const any = rows.some(x => x.a) || rows.some(x => Object.keys(LOCS).some(l => LL[l][x.d.id].adj.find(a => a.countId === c.id)));
+    const any = rows.some(x => x.a);
     if (!any) return `<div class="card muted">Počiatočný stav ${fmtD(c.date)}.</div>`;
     return `<div class="card"><table class="t"><tr><th>Rozdiel</th>${Object.values(LOCS).map(l => `<th>${l}</th>`).join("")}<th>Spolu</th></tr>` + rows.map(({ d, a }) =>
       `<tr><td>${esc(d.name)}</td>${Object.keys(LOCS).map(l => cell(LL[l][d.id].adj.find(x => x.countId === c.id))).join("")}${cell(a)}</tr>`
