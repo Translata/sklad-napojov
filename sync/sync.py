@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import io
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+HERE = Path(__file__).resolve().parent
+TZ = ZoneInfo("Europe/Bratislava")
+SITE_HOST, SITE_PATH = "translata.sharepoint.com", "/sites/liquidpositive"
+TARGET = "Sklad-app/predaje.json"
+GSO_NAME = re.compile(r"good\s*stuff\s*only", re.I)
+B2C_PRIVATE = "E-shop (súkromné osoby)"
+PRIVATE = "Súkromná osoba"
+
+SHOPIFY_QUERY = """
+query($q: String!, $after: String) {
+  orders(first: 50, after: $after, query: $q, sortKey: CREATED_AT) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      name createdAt cancelledAt
+      billingAddress { company name }
+      customer { displayName }
+      fulfillments { status location { name } }
+      lineItems(first: 50) {
+        pageInfo { hasNextPage }
+        nodes { id title currentQuantity variant { id } }
+      }
+    }
+  }
+}
+"""
+
+
+def load_env():
+    for f in (HERE / ".env", HERE.parent / "import" / ".env"):
+        if not f.exists():
+            continue
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                v = v.strip().strip('"').strip("'")
+                if v:
+                    os.environ.setdefault(k.strip(), v)
+
+
+def env(name, required=True):
+    v = os.environ.get(name, "")
+    if required and not v:
+        sys.exit(f"Chýba premenná {name}")
+    return v
+
+
+class FetchError(Exception):
+    pass
+
+
+def http(url, data=None, headers=None, method=None):
+    req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
+    where = url.split("?")[0][:80]
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(30 * (attempt + 1))
+                continue
+            body = e.read().decode("utf-8", "replace")[:200]
+            raise FetchError(f"HTTP {e.code} z {where}: {body}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if attempt == 3:
+                raise FetchError(f"Spojenie s {where.split('/')[2]} zlyhalo: {getattr(e, 'reason', e)}")
+            time.sleep(10 * (attempt + 1))
+
+
+def local_day(ts):
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(TZ).date().isoformat()
+
+
+def shoptet_lines(mapping, since):
+    raw = http(env("SHOPTET_EXPORT_URL"), headers={"User-Agent": "sklad-app-sync/1.0"})
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1250")
+    rows = list(csv.DictReader(io.StringIO(text), delimiter=";"))
+    need = {"code", "date", "orderItemType", "orderItemCode", "orderItemAmount"}
+    if rows and not need <= set(rows[0]):
+        sys.exit("Shoptet export nemá potrebné stĺpce: " + ", ".join(sorted(need - set(rows[0]))))
+    codes, ignore = mapping["shoptet"]["codes"], set(mapping["shoptet"]["ignorovat"])
+    per_unit = {c: {name: 1} for c, name in codes.items()}
+    per_unit.update(mapping["shoptet"].get("mixed", {}))
+    gso_ico = os.environ.get("GSO_ICO", "").strip()
+
+    agg = defaultdict(float)
+    unmapped = defaultdict(float)
+    orders = set()
+    for r in rows:
+        d = (r.get("date") or "")[:10]
+        if d < since or r.get("orderItemType") != "product":
+            continue
+        if r.get("statusName") and r["statusName"] != "Odoslaná":
+            continue
+        code = (r.get("orderItemCode") or "").strip()
+        qty = float((r.get("orderItemAmount") or "0").replace(",", ".") or 0)
+        if code not in per_unit:
+            if code and code not in ignore:
+                unmapped[f'{code} {(r.get("orderItemName") or "")[:50]}'] += qty
+            continue
+        ico = (r.get("billCompanyId") or r.get("customerIdentificationNumber") or "").strip()
+        company = (r.get("billCompany") or "").strip()
+        gso = bool(GSO_NAME.search(company)) or (gso_ico and ico == gso_ico)
+        person = (r.get("billFullName") or r.get("billName") or "").strip()
+        customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
+        o = r["code"]
+        for name, n in per_unit[code].items():
+            agg[(d, o, customer, ico, gso, name)] += qty * n
+        orders.add(o)
+
+    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), "gso": g, "k": k, "q": round(q)}
+             for (d, o, c, i, g, k), q in sorted(agg.items()) if round(q)]
+    return lines, dict(unmapped), len(orders)
+
+
+def shopify_token(store):
+    if os.environ.get("SHOPIFY_TOKEN"):
+        return os.environ["SHOPIFY_TOKEN"]
+    body = urllib.parse.urlencode({
+        "client_id": env("SHOPIFY_CLIENT_ID"), "client_secret": env("SHOPIFY_CLIENT_SECRET"),
+        "grant_type": "client_credentials"}).encode()
+    res = json.loads(http(f"https://{store}.myshopify.com/admin/oauth/access_token", data=body,
+                          headers={"Content-Type": "application/x-www-form-urlencoded"}))
+    return res["access_token"]
+
+
+def shopify_lines(mapping, since):
+    store = env("SHOPIFY_STORE")
+    version = os.environ.get("SHOPIFY_API_VERSION", "2026-07")
+    token = shopify_token(store)
+    url = f"https://{store}.myshopify.com/admin/api/{version}/graphql.json"
+    headers = {"Content-Type": "application/json", "X-Shopify-Access-Token": token}
+
+    variants = {}
+    for d in mapping["drinks"]:
+        for v in d["variants"]:
+            variants[v["shopifyVariantId"]] = ({d["name"]: v["cans"]}, "B2B" if v["cans"] == 1 else "B2C")
+    for p in mapping.get("mixed", []):
+        for v in p["variants"]:
+            variants[v["shopifyVariantId"]] = (dict(v["cans"]), "B2C")
+    ignore = set(mapping.get("ignorovat", []))
+    locations = mapping.get("shopifyLocations", {})
+
+    agg = defaultdict(int)
+    unmapped = defaultdict(int)
+    per_order = defaultdict(int)
+    n_orders = 0
+    after = None
+    while True:
+        payload = json.dumps({"query": SHOPIFY_QUERY,
+                              "variables": {"q": f"created_at:>={since}", "after": after}}).encode()
+        for _ in range(6):
+            res = json.loads(http(url, data=payload, headers=headers))
+            if res.get("errors") and "THROTTLED" in json.dumps(res["errors"]):
+                time.sleep(3)
+                continue
+            break
+        if res.get("errors"):
+            sys.exit("Shopify GraphQL chyba: " + json.dumps(res["errors"])[:300])
+        page = res["data"]["orders"]
+        for o in page["nodes"]:
+            if o["cancelledAt"]:
+                continue
+            if o["lineItems"]["pageInfo"]["hasNextPage"]:
+                sys.exit(f"Objednávka {o['name']} má viac ako 50 položiek, treba upraviť skript.")
+            n_orders += 1
+            day = local_day(o["createdAt"])
+            sent = [f for f in o.get("fulfillments") or [] if f["status"] == "SUCCESS" and f.get("location")]
+            loc = locations.get(sent[-1]["location"]["name"], "ppp") if sent else "ppp"
+            bill = o.get("billingAddress") or {}
+            company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
+                or (bill.get("name") or "").strip() or PRIVATE
+            for li in o["lineItems"]["nodes"]:
+                qty = li["currentQuantity"]
+                vid = (li["variant"] or {}).get("id")
+                if not qty or vid in ignore:
+                    continue
+                if vid not in variants:
+                    unmapped[li["title"][:60]] += qty
+                    continue
+                cans, kind = variants[vid]
+                for name, n in cans.items():
+                    agg[(day, name, kind, loc)] += n * qty
+                    per_order[(o["name"], day, company, kind, name, loc)] += n * qty
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
+
+    lines = [{"d": d, "k": k, "t": t, "loc": l, "q": q} for (d, k, t, l), q in sorted(agg.items()) if q]
+    orders = [{"o": o, "d": d, "c": c, "t": t, "k": k, "loc": l, "q": q} for (o, d, c, t, k, l), q in sorted(per_order.items()) if q]
+    return lines, dict(unmapped), n_orders, orders
+
+
+_graph = {}
+
+
+def graph():
+    if not _graph:
+        body = urllib.parse.urlencode({
+            "client_id": env("GRAPH_CLIENT_ID"), "client_secret": env("GRAPH_CLIENT_SECRET"),
+            "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"}).encode()
+        tok = json.loads(http(f"https://login.microsoftonline.com/{env('GRAPH_TENANT_ID')}/oauth2/v2.0/token",
+                              data=body))["access_token"]
+        _graph["auth"] = {"Authorization": f"Bearer {tok}"}
+        site = json.loads(http(f"https://graph.microsoft.com/v1.0/sites/{SITE_HOST}:{SITE_PATH}",
+                               headers=_graph["auth"]))["id"]
+        _graph["url"] = f"https://graph.microsoft.com/v1.0/sites/{site}/drive/root:/{TARGET}:/content"
+    return _graph
+
+
+def download_previous():
+    g = graph()
+    req = urllib.request.Request(g["url"], headers=g["auth"])
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        sys.exit(f"HTTP {e.code} pri čítaní predchádzajúceho {TARGET}")
+
+
+def keep_old_shopify(order_lines, prev, today):
+    if not prev:
+        return order_lines, 0
+    current = {l["o"] for l in order_lines}
+    cutoff = (today - timedelta(days=55)).isoformat()
+    old = [l for l in prev.get("shopifyOrders", []) if l["o"] not in current and l["d"] < cutoff]
+    return sorted(order_lines + old, key=lambda l: (l["d"], l["o"])), len({l["o"] for l in old})
+
+
+def aggregate_shopify(order_lines):
+    agg = defaultdict(int)
+    for l in order_lines:
+        agg[(l["d"], l["k"], l["t"], l.get("loc", "ppp"))] += l["q"]
+    return [{"d": d, "k": k, "t": t, "loc": loc, "q": q} for (d, k, t, loc), q in sorted(agg.items()) if q]
+
+
+def upload(data):
+    g = graph()
+    http(g["url"], data=json.dumps(data, ensure_ascii=False).encode(), method="PUT",
+         headers={**g["auth"], "Content-Type": "application/json"})
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--from", dest="since", default="2026-07-01", help="od dátumu vytvorenia objednávky (YYYY-MM-DD)")
+    ap.add_argument("--out", help="uložiť aj lokálne do súboru")
+    ap.add_argument("--no-upload", action="store_true", help="nezapisovať na SharePoint")
+    a = ap.parse_args()
+    load_env()
+    mapping = json.loads((HERE / "mapping.json").read_text())
+
+    use_graph = not a.no_upload and bool(os.environ.get("GRAPH_CLIENT_SECRET"))
+    if use_graph:
+        prev = download_previous()
+    elif a.out and Path(a.out).exists():
+        prev = json.loads(Path(a.out).read_text())
+    else:
+        prev = None
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        sh_lines, sh_unmapped, sh_orders = shoptet_lines(mapping, a.since)
+        sh_updated = now_iso
+    except FetchError as e:
+        if not prev or "shoptet" not in prev:
+            raise
+        print(f"::warning::Shoptet sa nepodarilo načítať ({str(e)[:80]}), ostávajú údaje z minulého behu.")
+        sh_lines, sh_unmapped = prev["shoptet"], prev.get("unmapped", {}).get("shoptet", {})
+        sh_orders = len({l["o"] for l in sh_lines})
+        sh_updated = prev.get("shoptetUpdatedAt", prev.get("updatedAt"))
+    sf_lines, sf_unmapped, sf_orders, sf_order_lines = shopify_lines(mapping, a.since)
+    sf_order_lines, kept = keep_old_shopify(sf_order_lines, prev, datetime.now(TZ).date())
+    sf_lines = aggregate_shopify(sf_order_lines)
+    data = {
+        "updatedAt": now_iso,
+        "shoptetUpdatedAt": sh_updated,
+        "since": a.since,
+        "shoptet": sh_lines,
+        "shopify": sf_lines,
+        "shopifyOrders": sf_order_lines,
+        "unmapped": {"shoptet": sh_unmapped, "shopify": sf_unmapped},
+    }
+
+    gso = sum(l["q"] for l in sh_lines if l["gso"])
+    direct = sum(l["q"] for l in sh_lines if not l["gso"])
+    print(f"Od {a.since}: Shoptet {sh_orders} objednávok (GSO {gso} ks, priamo {direct} ks), "
+          f"Shopify {sf_orders} objednávok ({sum(l['q'] for l in sf_lines)} ks)")
+    print(f"Shopify staršie ako 60 dní (z predchádzajúceho súboru): {kept} objednávok")
+    print(f"Nesledované položky: Shoptet {len(sh_unmapped)}, Shopify {len(sf_unmapped)}")
+
+    if a.out:
+        Path(a.out).write_text(json.dumps(data, ensure_ascii=False, indent=1))
+        print("Uložené lokálne:", a.out)
+    if not use_graph:
+        print("Na SharePoint sa nezapisuje.")
+        return
+    upload(data)
+    print("Zapísané na SharePoint:", TARGET)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except FetchError as e:
+        sys.exit(str(e))

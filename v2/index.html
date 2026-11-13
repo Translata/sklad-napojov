@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Liquid Positive</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.3/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#fff; --border:#e5e7eb; --line:#f0f1f3; --text:#111827; --muted:#6b7280; --faint:#9ca3af;
+    --accent:#1d4ed8; --accent-soft:#eef2ff; --danger:#b91c1c; --danger-soft:#fef2f2; --ok:#047857; --ok-soft:#ecfdf5;
+    --warn:#92400e; --warn-soft:#fffbeb;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg);
+    color:var(--text); padding-bottom:84px; font-size:15px; line-height:1.4;}
+  header{background:var(--card); border-bottom:1px solid var(--border); padding:12px 16px; position:sticky; top:0; z-index:10;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  header h1{font-size:17px; margin:0; font-weight:700; letter-spacing:-.01em;}
+  header .right{display:flex; gap:6px;}
+  .link{background:none; color:var(--accent); padding:6px 8px; font-size:14px; font-weight:600;}
+  main{padding:14px 12px; max-width:720px; margin:0 auto;}
+  main.wide{max-width:none;}
+  .kanban{display:flex; gap:10px; overflow-x:auto; align-items:flex-start; padding-bottom:8px; margin:0 -12px; padding-left:12px; padding-right:12px;}
+  .kcol{flex:0 0 260px; background:#e9ebef; border-radius:12px; padding:8px; min-height:120px;}
+  .kcol.over{background:#dbe4ff;}
+  .khead{display:flex; justify-content:space-between; align-items:center; padding:4px 4px 8px; font-weight:700; font-size:14px;}
+  .kcard{background:#fff; border-radius:10px; padding:10px; margin-bottom:8px; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer;}
+  .kcard:active{opacity:.7;}
+  .title{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:4px 4px 12px;}
+  .title h2{font-size:22px; margin:0; letter-spacing:-.02em;}
+  .title .muted{text-align:right;}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:12px;}
+  .card h3{font-size:12px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:600;}
+  .muted{color:var(--muted); font-size:13px;}
+  .num{font-variant-numeric:tabular-nums;}
+  .empty{color:var(--muted); text-align:center; padding:18px 0;}
+  label{display:block; font-size:13px; color:var(--muted); margin:10px 0 4px;}
+  input[type=text], input[type=number], input[type=date], select{
+    width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--border); border-radius:10px;
+    background:#fff; color:var(--text); font-family:inherit;}
+  input[type=date]{-webkit-appearance:none; appearance:none; min-height:44px; display:block; text-align:left;}
+  input[type=date]::-webkit-date-and-time-value{text-align:left;}
+  input:focus, select:focus{outline:2px solid var(--accent-soft); border-color:var(--accent);}
+  button{font-size:15px; padding:12px 16px; border-radius:10px; border:none; cursor:pointer; background:var(--accent);
+    color:#fff; font-weight:600; font-family:inherit;}
+  button.block{width:100%; margin-top:14px;}
+  button.secondary{background:#e5e7eb; color:var(--text);}
+  button.small{padding:6px 10px; font-size:13px;}
+  button.del{background:none; color:var(--danger); padding:4px 0 4px 10px; font-size:13px; font-weight:500;}
+  button:disabled{opacity:.5; cursor:default;}
+  .row{display:flex; gap:8px;} .row > *{flex:1; min-width:0;}
+
+  .qty .grp{font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:16px 0 2px;}
+  .qty .grp:first-child{margin-top:4px;}
+  .qty .it{display:flex; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid var(--line);}
+  .qty .it:last-child{border-bottom:none;}
+  .qty .it span{flex:1; min-width:0;}
+  .qty .it input{width:96px; text-align:right; padding:9px 10px;}
+  .total{display:flex; justify-content:space-between; font-weight:600; padding-top:10px;}
+
+  .stock{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); cursor:pointer;}
+  .stock:last-child{border-bottom:none;}
+  .stock .n{font-size:22px; font-weight:700; letter-spacing:-.02em;}
+  .stock .n.neg{color:var(--danger);}
+  .detail{padding:2px 0 10px;}
+
+  .ln{display:flex; justify-content:space-between; gap:12px; padding:3px 0; font-size:14px;}
+  .ln .v{font-variant-numeric:tabular-nums; white-space:nowrap;}
+  .ln.in1{padding-left:14px;} .ln.in2{padding-left:28px; color:var(--muted);}
+  .ln.sum{border-top:1px solid var(--border); margin-top:4px; padding-top:7px; font-weight:600;}
+  .ln.key{font-weight:700;} .ln.bad{color:var(--danger); font-weight:700;}
+  .drink{border-top:1px solid var(--border); padding-top:12px; margin-top:12px;}
+  .drink:first-of-type{border-top:none; padding-top:0; margin-top:0;}
+  .drink .name{font-weight:700; font-size:16px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px;}
+
+  .kpis{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+  .kpi{background:var(--bg); border-radius:10px; padding:10px 12px;}
+  .kpi .l{font-size:12px; color:var(--muted);} .kpi .v{font-size:22px; font-weight:700; letter-spacing:-.02em;}
+  .kpi.hl{background:var(--accent-soft);} .kpi.hl .v{color:var(--accent);}
+  .kpi.bad{background:var(--danger-soft);} .kpi.bad .v{color:var(--danger);}
+
+  .chips{display:flex; gap:6px; overflow-x:auto; padding:2px 2px 10px; margin:0 -2px;}
+  .chips button{background:#fff; color:var(--text); border:1px solid var(--border); padding:7px 12px; font-size:13px; font-weight:500; white-space:nowrap; border-radius:999px;}
+  .chips button.on{background:var(--text); color:#fff; border-color:var(--text);}
+
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  td{padding:7px 0; border-bottom:1px solid var(--line);} td:last-child{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; padding-left:10px;}
+  tr:last-child td{border-bottom:none;}
+
+  .entry{display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);}
+  .entry:last-child{border-bottom:none;}
+  .entry .l{min-width:0; overflow-wrap:anywhere;} .entry .r{text-align:right; white-space:nowrap;}
+  .note{background:var(--warn-soft); color:var(--warn); border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px;}
+  .note.bad{background:var(--danger-soft); color:var(--danger);}
+
+  .screen{display:none;} .screen.active{display:block;}
+  nav.tabs{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--border);
+    display:flex; z-index:10; padding-bottom:env(safe-area-inset-bottom,0px);}
+  nav.tabs button{flex:1; background:none; color:var(--faint); border-radius:0; padding:8px 2px 9px; font-size:11px;
+    font-weight:500; display:flex; flex-direction:column; align-items:center; gap:3px;}
+  nav.tabs button.active{color:var(--accent); font-weight:700;}
+  nav.tabs svg{width:22px; height:22px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+
+  .center{min-height:70vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; gap:14px;}
+  .center p{color:var(--muted); max-width:340px;}
+  .spinner{width:34px; height:34px; border-radius:50%; border:4px solid var(--border); border-top-color:var(--accent); animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .toast{position:fixed; bottom:92px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 18px;
+    border-radius:10px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s; z-index:30; max-width:90%; text-align:center;}
+  .toast.show{opacity:1;}
+  .seg{display:flex; background:#e5e7eb; border-radius:10px; padding:3px; gap:3px; margin-bottom:12px;}
+  .seg button{flex:1; background:none; color:var(--muted); padding:8px 4px; font-size:13px; font-weight:600; border-radius:8px;}
+  .seg button.on{background:#fff; color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .big{font-size:26px; font-weight:800; letter-spacing:-.03em; margin:2px 0;}
+  .big.bad{color:var(--danger);} .big.ok{color:var(--ok);} .big.warn{color:var(--warn);}
+  .flow{font-size:13px; color:var(--muted); margin-top:4px;}
+  table.t{font-size:14px;} table.t th{font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    text-align:right; padding:0 0 6px 6px; border-bottom:1px solid var(--border);} table.t th:first-child{text-align:left; padding-left:0;}
+  table.t td{text-align:right; padding:9px 0 9px 6px; font-variant-numeric:tabular-nums; white-space:nowrap;} table.t td:first-child{text-align:left; padding-left:0; white-space:normal;}
+  table.t tr.click{cursor:pointer;} table.t tr.sumr td{font-weight:700; border-top:1px solid var(--border); border-bottom:none;}
+  table.t td.bad{color:var(--danger); font-weight:700;} table.t td.warn{color:var(--warn); font-weight:700;} table.t td.ok{color:var(--ok);}
+  table.t tr.det td{background:var(--bg); padding:8px 10px; white-space:normal; text-align:left;}
+  .caret{color:var(--faint); font-size:11px; margin-left:4px;}
+  .bar{display:flex; gap:8px; align-items:center; justify-content:space-between; margin:0 0 12px;}
+  .bar select{font-weight:600;}
+  select{-webkit-appearance:none; appearance:none; width:auto; max-width:100%; padding:9px 34px 9px 12px;
+    background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%236b7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;}
+  .bar .seg{margin:0; flex:0 0 auto;} .bar .seg button{padding:8px 12px; white-space:nowrap;}
+  .formula .ln{padding:4px 0;} .formula .ln.zero{color:var(--faint);}
+  .formula .ln.total{border-top:1px solid var(--border); margin-top:6px; padding-top:8px; font-size:17px; font-weight:700;}
+  .mv{display:flex; justify-content:space-between; gap:10px; padding:11px 0; border-bottom:1px solid var(--line); cursor:pointer;}
+  .mv:last-child{border-bottom:none;} .mv .l{min-width:0;} .mv .r{white-space:nowrap; font-weight:700; font-variant-numeric:tabular-nums;}
+  .mv .r.plus{color:var(--ok);} .mv .r.minus{color:var(--text);} .mv .r.bad{color:var(--danger);}
+  .mv .r.withsel{display:flex; align-items:center; gap:8px;}
+  select.locsel{padding:4px 24px 4px 10px; font-size:13px; font-weight:700; border-radius:999px; background-position:right 8px center; min-height:0;}
+  select.locsel.ppp{background-color:#eef2ff; color:#1d4ed8; border-color:#c7d2fe;}
+  select.locsel.gso{background-color:#fff7ed; color:#c2410c; border-color:#fed7aa;}
+  .mv-det{padding:0 0 12px; border-bottom:1px solid var(--line);}
+  header .mode{margin:0; width:180px;}
+  .chip{display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;}
+  .chip.ok{background:var(--ok-soft); color:var(--ok);} .chip.neu{background:#eceef2; color:var(--muted);}
+  .chip.warn{background:var(--warn-soft); color:var(--warn);} .chip.ppp{background:#eef2ff; color:#1d4ed8;} .chip.sql{background:#f3e8ff; color:#7e22ce;}
+  a{color:var(--accent); text-decoration:none;}
+  .demo{background:var(--warn-soft); color:var(--warn); text-align:center; font-size:12px; padding:4px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="hdr-title">Liquid Positive</h1>
+  <div class="seg mode" id="mode-sw" style="display:none"><button data-m="sklad" onclick="setMode('sklad')">Sklad</button><button data-m="crm" onclick="setMode('crm')">CRM</button></div>
+  <div class="right" id="hdr-right" style="display:none;">
+    <button class="link" onclick="S.modeBeforeSettings=isCrm(S.screen)?'crm':'sklad';go('nastavenia')">Nastavenia</button>
+  </div>
+</header>
+<div id="demo-bar" class="demo" style="display:none;">Ukážkový režim: dáta sú len v tomto prehliadači.</div>
+
+<div id="auth-gate" class="center" style="display:none;">
+  <p>Dáta sú uložené v SharePointe Liquid Positive. Prihlás sa pracovným Microsoft účtom.</p>
+  <button onclick="prihlasit()">Prihlásiť sa cez Microsoft</button>
+  <p id="auth-error" style="color:var(--danger);"></p>
+</div>
+<div id="app-loading" class="center" style="display:none;">
+  <div class="spinner"></div><p id="loading-text">Načítavam dáta...</p>
+</div>
+
+<div id="app-root" style="display:none;">
+<main>
+  <section id="screen-prehlad" class="screen active"></section>
+  <section id="screen-zadat" class="screen"></section>
+  <section id="screen-pohyby" class="screen"></section>
+  <section id="screen-nastavenia" class="screen"></section>
+  <section id="screen-crm-dnes" class="screen"></section>
+  <section id="screen-crm-firmy" class="screen"></section>
+  <section id="screen-crm-firma" class="screen"></section>
+  <section id="screen-crm-edit" class="screen"></section>
+  <section id="screen-crm-kontakty" class="screen"></section>
+  <section id="screen-crm-kedit" class="screen"></section>
+</main>
+<nav class="tabs" id="nav-sklad">
+  <button data-s="prehlad" onclick="go('prehlad')"><svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v9l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v9"/></svg>Prehľad</button>
+  <button data-s="zadat" onclick="go('zadat')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg>Zadať</button>
+  <button data-s="pohyby" onclick="go('pohyby')"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Pohyby</button>
+</nav>
+<nav class="tabs" id="nav-crm" style="display:none">
+  <button data-s="crm-dnes" onclick="go('crm-dnes')"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Na dnes</button>
+  <button data-s="crm-firmy" onclick="go('crm-firmy')"><svg viewBox="0 0 24 24"><path d="M4 20V6l7-3v17M11 9h9v11M7 8v.5M7 12v.5M7 16v.5M15 13v.5M15 16.5v.5"/><path d="M3 20h18"/></svg>Firmy</button>
+  <button data-s="crm-kontakty" onclick="go('crm-kontakty')"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg>Kontakty</button>
+</nav>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+
+const APP_VERSION = "v8.6";
+const DEMO = new URLSearchParams(location.search).has("demo");
+const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
+  authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
+  redirectUri: location.origin + location.pathname }, cache:{ cacheLocation:"localStorage" } };
+const GRAPH_SCOPES = ["Sites.ReadWrite.All"];
+const SITE_HOST = "translata.sharepoint.com", SITE_PATH = "/sites/liquidpositive";
+const FILE = "Sklad-app/sklad.json", FILE_SALES = "Sklad-app/predaje.json", FILE_V1 = "Sklad-app/sklad-data.json";
+const LP_NAMES = ["Orange","Marakuja","Granat","Granát","Pure","Cannabis","Cherry","Outlast"];
+const G_LP = "Liquid Positive", G_OTHER = "Pivo";
+const LOCS = { ppp:"PPP", gso:"GSO" };
+const otherLoc = l => l === "ppp" ? "gso" : "ppp";
+const OUT = {
+  propagacia:{ label:"Propagácia", field:"Akcia", ph:"napr. Bratislava Marathon", gso:true, loc:"gso" },
+  mimo:      { label:"Predaj mimo Shopify", field:"Odberateľ", ph:"napr. firma, číslo faktúry", gso:true, loc:"gso" },
+  odpis:     { label:"Odpis", field:"Dôvod", ph:"napr. rozbité pri vykládke", gso:false, loc:"ppp" }
+};
+
+let S = { data:null, etag:null, sales:null, user:"", screen:"stav", period:null, open:{}, outType:"propagacia", mGroup:null, mTab:"sklad", mOpen:null, month:null, entry:"prijem", pFilter:"all", pOpen:null, lastInv:null, loc:"all", outLoc:null, trFrom:"ppp", invLoc:"ppp" };
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const nf = new Intl.NumberFormat("sk-SK");
+const fmtN = n => nf.format(n);
+const fmtS = n => n < 0 ? "−" + fmtN(-n) : fmtN(n);
+const fmtD = iso => { const [y,m,d] = iso.split("-"); return `${+d}. ${+m}. ${y}`; };
+const fmtDs = iso => { const [,m,d] = iso.split("-"); return `${+d}. ${+m}.`; };
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
+const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, "");
+function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
+const emptyData = () => ({ version:7, drinks:[], receipts:[], counts:[], outs:[], transfers:[], beforeCount:{} });
+function normalize(d){ ["drinks","receipts","counts","outs","transfers"].forEach(k => d[k] = d[k] || []); d.beforeCount = d.beforeCount || {};
+  d.shopifyLoc = d.shopifyLoc || {};
+  (d.giveaways || []).forEach(g => d.outs.push({ id:g.id, type:"propagacia", date:g.date, label:g.event, items:g.items, by:g.by, at:g.at }));
+  delete d.giveaways;
+  d.drinks.forEach(x => { if (!x.key) x.key = x.name; delete x.gso; if (x.group === "Krab a pivá") x.group = G_OTHER; }); return d; }
+
+const drinks = (all) => S.data.drinks.filter(d => all || !d.hidden);
+const drinkById = id => S.data.drinks.find(d => d.id === id);
+const startDate = () => S.data.startDate || "";
+const counts = () => S.data.counts.filter(c => c.date >= startDate()).sort((a,b) => a.date.localeCompare(b.date));
+const groups = list => { const g = {}; list.forEach(d => (g[d.group || G_OTHER] = g[d.group || G_OTHER] || []).push(d));
+  return Object.entries(g).sort((a,b) => (a[0] === G_LP ? -1 : b[0] === G_LP ? 1 : a[0].localeCompare(b[0]))); };
+
+const outLoc = o => o.loc || OUT[o.type].loc;
+const shopifyLocOf = l => S.data.shopifyLoc[l.o] || l.loc || "ppp";
+function salesFor(){
+  const byKey = {}; S.data.drinks.forEach(d => { byKey[norm(d.key)] = d.id; });
+  const sh = [], sf = []; const s = S.sales || {};
+  (s.shoptet || []).forEach(l => { const id = byKey[norm(l.k)];
+    if (id) sh.push({ ...l, d:S.data.beforeCount[l.o] ? addDays(l.d, -1) : l.d, drinkId:id }); });
+  (s.shopifyOrders || s.shopify || []).forEach(l => { const id = byKey[norm(l.k)];
+    if (id) sf.push({ ...l, loc:shopifyLocOf(l), drinkId:id }); });
+  return { sh, sf };
+}
+
+const MONTHS = ["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+const monthName = ym => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+const nextMonth = ym => { let [y, m] = ym.split("-").map(Number); m++; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, "0")}`; };
+const countedAt = (c, l, id) => c.loc ? (c.loc[l] || {})[id] : (l === "ppp" ? c.counts[id] : undefined);
+function buildLedger(loc = null){
+  const sales = salesFor(), C = counts(), L = {}, locs = Object.keys(LOCS);
+  S.data.drinks.forEach(d => {
+    const mv = [], add = (date, k, q, at) => mv.push({ date, k, q, loc:at });
+    S.data.receipts.forEach(r => { if (r.drinkId === d.id) add(r.date, "prod", r.qty, r.loc || "ppp"); });
+    S.data.outs.forEach(o => { if (o.items[d.id]) add(o.date, o.type, -o.items[d.id], outLoc(o)); });
+    sales.sh.forEach(x => { if (x.drinkId === d.id && !x.gso) add(x.d, "ppp", -x.q, "ppp"); });
+    sales.sf.forEach(x => { if (x.drinkId === d.id) add(x.d, x.t === "B2C" ? "b2c" : "b2b", -x.q, x.loc || "ppp"); });
+    S.data.transfers.forEach(t => { const q = t.items[d.id]; if (!q) return; add(t.date, "tout", -q, t.from); add(t.date, "tin", q, t.to); });
+    const first = C.find(c => locs.some(l => countedAt(c, l, d.id) != null));
+    if (!first) { L[d.id] = { start:null, mv:[], adj:[] }; return; }
+    const per = {};
+    locs.forEach(l => {
+      const q0 = countedAt(first, l, d.id) ?? 0, m = mv.filter(x => x.loc === l && x.date >= first.date), adj = [];
+      C.filter(c => c.date > first.date && countedAt(c, l, d.id) != null).forEach(c => {
+        const n = countedAt(c, l, d.id), book = q0 + m.reduce((s, x) => s + (x.date < c.date ? x.q : 0), 0) + adj.reduce((s, a) => s + a.diff, 0);
+        adj.push({ date:c.date, countDate:c.date, countId:c.id, counted:n, book, diff:n - book, note:(c.notes || {})[d.id] || "" });
+      });
+      per[l] = { start:{ date:first.date, qty:q0, countId:first.id }, mv:m, adj };
+    });
+    if (loc) { L[d.id] = per[loc]; return; }
+    const adj = {};
+    locs.forEach(l => per[l].adj.forEach(a => { const x = adj[a.countId] = adj[a.countId] || { ...a, counted:0, book:0, diff:0 };
+      x.counted += a.counted; x.book += a.book; x.diff += a.diff; }));
+    L[d.id] = { start:{ date:first.date, qty:locs.reduce((s, l) => s + per[l].start.qty, 0), countId:first.id },
+      mv:locs.flatMap(l => per[l].mv).filter(x => x.k !== "tin" && x.k !== "tout"),
+      adj:Object.values(adj).sort((a, b) => a.date.localeCompare(b.date)) };
+  });
+  return L;
+}
+function bookAt(l, X){
+  if (!l.start || X < l.start.date) return null;
+  return l.start.qty + l.mv.reduce((s, x) => s + (x.date < X ? x.q : 0), 0) + l.adj.reduce((s, a) => s + (a.date < X ? a.diff : 0), 0);
+}
+function calc(l, from, to){
+  const r = { missing:!l.start || to <= l.start.date };
+  if (r.missing) return r;
+  r.from = from < l.start.date ? l.start.date : from; r.started = r.from !== from;
+  const inP = x => x >= r.from && x < to, sum = k => -l.mv.reduce((s, x) => s + (x.k === k && inP(x.date) ? x.q : 0), 0) || 0;
+  r.open = bookAt(l, r.from); r.prod = -sum("prod") || 0;
+  r.ppp = sum("ppp"); r.b2c = sum("b2c"); r.b2b = sum("b2b"); r.shopify = r.b2c + r.b2b;
+  r.tin = -sum("tin") || 0; r.tout = sum("tout");
+  Object.keys(OUT).forEach(t => { r[t] = sum(t); });
+  r.gsoInv = r.shopify + r.mimo + r.propagacia;
+  r.out = r.ppp + r.gsoInv + r.odpis;
+  r.adjs = l.adj.filter(a => inP(a.date)); r.adj = r.adjs.reduce((s, a) => s + a.diff, 0);
+  r.close = bookAt(l, to);
+  return r;
+}
+const diffCls = n => n < 0 ? "bad" : n > 0 ? "warn" : "ok";
+const diffWord = n => n < 0 ? "Manko" : n > 0 ? "Prebytok" : "Sedí";
+
+function formula(r, endLabel, loc){
+  const z = n => n ? "" : "zero", o = loc ? LOCS[otherLoc(loc)] : "";
+  return `<div class="formula">${ln(`Na sklade ${fmtDs(r.from)}`, fmtN(r.open))}${ln("+ Doskladnené", fmtN(r.prod), z(r.prod))}
+    ${loc ? ln(`+ Presun z ${o}`, fmtN(r.tin), z(r.tin)) + ln(`− Presun na ${o}`, fmtN(r.tout), z(r.tout)) : ""}
+    ${ln("− Shoptet", fmtN(r.ppp), z(r.ppp))}${ln("− Shopify", fmtN(r.shopify), z(r.shopify))}${ln("− Propagácia", fmtN(r.propagacia), z(r.propagacia))}
+    ${ln("− Predaj mimo Shopify", fmtN(r.mimo), z(r.mimo))}${ln("− Odpisy", fmtN(r.odpis), z(r.odpis))}
+    ${r.adj ? ln(r.adj < 0 ? "− Manko z inventúry" : "+ Prebytok z inventúry", fmtN(Math.abs(r.adj)), "bad") : ""}
+    ${ln(`= Na sklade ${endLabel}`, fmtS(r.close), "total")}</div>`;
+}
+const sumR = rows => { const t = { from:rows[0].r.from }; ["open","prod","ppp","shopify","b2c","b2b","propagacia","mimo","odpis","adj","close","gsoInv","tin","tout"].forEach(k => { t[k] = rows.reduce((s, x) => s + (x.r[k] || 0), 0); }); return t; };
+function monthsList(){
+  const I = counts(), cur = todayISO().slice(0, 7), M = [];
+  for (let m = (I[0] ? I[0].date : todayISO()).slice(0, 7); m <= cur; m = nextMonth(m)) M.push(m);
+  if (!S.month || !M.includes(S.month)) S.month = cur;
+  return M;
+}
+const monthSelect = rerender => `<select onchange="S.month=this.value;S.pOpen=null;${rerender}()">${monthsList().map(m => `<option value="${m}" ${m === S.month ? "selected" : ""}>${monthName(m)}</option>`).reverse().join("")}</select>`;
+let msalInstance = null, account = null, SITE_ID = null;
+async function initMsal(){
+  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  await msalInstance.initialize();
+  const res = await msalInstance.handleRedirectPromise();
+  if (res && res.account) { account = res.account; return; }
+  const a = msalInstance.getAllAccounts(); if (a.length) { account = a[0]; return; }
+  try { account = (await msalInstance.ssoSilent({ scopes:GRAPH_SCOPES })).account; } catch(e){}
+}
+function prihlasit(){ $("auth-error").textContent = ""; msalInstance.loginRedirect({ scopes:GRAPH_SCOPES }); }
+function odhlasit(){ msalInstance.logoutRedirect(); }
+async function token(){
+  try { return (await msalInstance.acquireTokenSilent({ scopes:GRAPH_SCOPES, account })).accessToken; }
+  catch(e){ await msalInstance.acquireTokenRedirect({ scopes:GRAPH_SCOPES }); return null; }
+}
+async function gfetch(url, opt = {}){
+  const t = await token();
+  return fetch(url, { ...opt, headers:{ Authorization:`Bearer ${t}`, ...(opt.headers || {}) } });
+}
+async function siteId(){
+  if (SITE_ID) return SITE_ID;
+  const r = await gfetch(`https://graph.microsoft.com/v1.0/sites/${SITE_HOST}:${SITE_PATH}`);
+  if (!r.ok) throw new Error(`Site (${r.status})`);
+  SITE_ID = (await r.json()).id; return SITE_ID;
+}
+const itemUrl = p => `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${p}`;
+
+const GraphStore = {
+  async load(file){
+    await siteId();
+    const meta = await gfetch(itemUrl(file));
+    if (meta.status === 404) return { data:null, etag:null };
+    if (!meta.ok) throw new Error(`Načítanie ${file} (${meta.status})`);
+    const etag = (await meta.json()).eTag;
+    const c = await gfetch(itemUrl(file) + ":/content");
+    if (!c.ok) throw new Error(`Obsah ${file} (${c.status})`);
+    return { data:await c.json(), etag };
+  },
+  async save(file, data, etag){
+    const headers = { "Content-Type":"application/json" };
+    if (etag) headers["If-Match"] = etag;
+    const r = await gfetch(itemUrl(file) + ":/content", { method:"PUT", headers, body:JSON.stringify(data) });
+    if (r.status === 412) throw new Error("CONFLICT");
+    if (!r.ok) throw new Error(`Zápis (${r.status})`);
+    return (await r.json()).eTag;
+  }
+};
+const DemoStore = {
+  async load(file){ let r = null; try { r = localStorage.getItem("sklad_v3_demo:" + file); } catch(e){}
+    r = r ?? (window.__mem || {})[file]; return { data:r ? JSON.parse(r) : null, etag:null }; },
+  async save(file, data){ try { localStorage.setItem("sklad_v3_demo:" + file, JSON.stringify(data)); }
+    catch(e){ (window.__mem = window.__mem || {})[file] = JSON.stringify(data); } return null; }
+};
+const Store = DEMO ? DemoStore : GraphStore;
+
+async function loadAll(){
+  const [m, s] = await Promise.all([Store.load(FILE), Store.load(FILE_SALES)]);
+  S.data = normalize(m.data || (DEMO ? seedDemo() : emptyData())); S.etag = m.etag; S.fresh = !m.data && !DEMO;
+  S.sales = s.data;
+}
+async function mutate(fn, okMsg){
+  const snap = JSON.stringify(S.data);
+  try { fn(); S.etag = await Store.save(FILE, S.data, S.etag); S.fresh = false; if (okMsg) toast(okMsg); renderAll(); return true; }
+  catch(e){
+    S.data = JSON.parse(snap);
+    if (e.message === "CONFLICT") { toast("Dáta medzitým zmenil niekto iný. Načítavam znova, zopakuj zápis."); await loadAll(); renderAll(); }
+    else { toast("Chyba: " + e.message); renderAll(); }
+    return false;
+  }
+}
+const stamp = () => ({ by:S.user, at:new Date().toISOString() });
+
+const isCrm = s => s.startsWith("crm-");
+const NAV_OF = { "crm-firma":"crm-firmy", "crm-edit":"crm-firmy", "crm-kedit":"crm-kontakty" };
+function setMode(m){ go(m === "crm" ? (S.lastCrm || "crm-dnes") : (S.lastSklad || "prehlad")); }
+function go(s){
+  if (s !== "nastavenia") { if (isCrm(s)) S.lastCrm = NAV_OF[s] || s; else S.lastSklad = s; }
+  if (s === "crm-firmy" || s === "crm-dnes") C.back = s;
+  S.screen = s;
+  document.querySelector("main").classList.remove("wide");
+  const crm = isCrm(s);
+  $("nav-sklad").style.display = crm ? "none" : "flex"; $("nav-crm").style.display = crm ? "flex" : "none";
+  document.querySelectorAll("#mode-sw button").forEach(b => b.classList.toggle("on", b.dataset.m === (crm ? "crm" : "sklad")));
+  document.querySelectorAll(".screen").forEach(e => e.classList.toggle("active", e.id === "screen-" + s));
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.s === (NAV_OF[s] || s)));
+  window.scrollTo(0, 0); renderAll();
+}
+function renderAll(){
+  if (!S.data) return;
+  $("hdr-right").style.display = "flex"; $("mode-sw").style.display = "flex"; $("hdr-title").style.display = "none";
+  ({ prehlad:renderPrehlad, zadat:renderZadat, pohyby:renderPohyby, nastavenia:renderNastavenia, "crm-dnes":renderCrmDnes, "crm-firmy":renderCrmFirmy,
+     "crm-firma":renderCrmFirma, "crm-edit":renderCrmEdit, "crm-kontakty":renderCrmKontakty, "crm-kedit":renderCrmKedit }[S.screen])();
+}
+const ln = (label, v, cls = "") => `<div class="ln ${cls}"><span>${label}</span><span class="v">${v}</span></div>`;
+function syncInfo(){
+  if (!S.sales) return `<div class="note">Chýbajú predaje zo Shoptetu a Shopify.</div>`;
+  const fmt = d => d.toLocaleString("sk-SK", { day:"numeric", month:"numeric", hour:"2-digit", minute:"2-digit" });
+  const t = new Date(S.sales.updatedAt), old = (Date.now() - t) / 36e5 > 36;
+  const sh = new Date(S.sales.shoptetUpdatedAt || S.sales.updatedAt), shOld = (Date.now() - sh) / 36e5 > 36;
+  return `<p class="muted" style="margin:10px 4px;text-align:center;${old || shOld ? "color:var(--warn)" : ""}">Predaje k ${fmt(t)}${shOld && !old ? ` · Shoptet len k ${fmt(sh)}` : ""}</p>`;
+}
+function onboarding(){
+  return `<div class="card"><h3>Začíname</h3><p>Appka zatiaľ nemá žiadne dáta. Načítaj nápoje, príjmy a inventúry z pôvodnej appky.</p>
+    <button class="block" onclick="migrateV1()">Načítať dáta z pôvodnej appky</button></div>`;
+}
+
+function renderPrehlad(){
+  const el = $("screen-prehlad");
+  if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
+  if (!counts().length) { S.entry = "inv"; el.innerHTML = `<div class="card empty">Najprv zadaj počiatočnú inventúru.<br><br><button onclick="go('zadat')">Zadať inventúru</button></div>`; return; }
+  monthsList();
+  const cur = S.month === todayISO().slice(0, 7), from = S.month + "-01", end = cur ? addDays(todayISO(), 1) : nextMonth(S.month) + "-01";
+  const endLabel = cur ? "dnes" : fmtDs(addDays(end, -1));
+  const G = groups(drinks()); if (!G.some(([g]) => g === S.mGroup)) S.mGroup = G[0][0];
+  const loc = S.loc === "all" ? null : S.loc;
+  const list = G.find(([g]) => g === S.mGroup)[1], L = buildLedger(loc);
+  const rows = list.map(d => ({ d, r:calc(L[d.id], from, end) })), ok = rows.filter(x => !x.r.missing);
+  let h = `<div class="bar">${monthSelect("renderPrehlad")}${G.length > 1 ? `<div class="seg">${G.map(([g]) =>
+    `<button class="${g === S.mGroup ? "on" : ""}" onclick="S.mGroup='${esc(g)}';S.mOpen=null;renderPrehlad()">${esc(g === G_LP ? "LP" : g)}</button>`).join("")}</div>` : ""}</div>
+    <div class="seg">${[["all","Spolu"], ...Object.entries(LOCS)].map(([k, l]) => `<button class="${k === S.loc ? "on" : ""}" onclick="S.loc='${k}';S.mOpen=null;renderPrehlad()">${l}</button>`).join("")}</div>`;
+  if (ok.length) h += `<div class="card">${formula(sumR(ok), endLabel, loc)}</div>`;
+  h += `<div class="card">`;
+  rows.forEach(({ d, r }) => {
+    const open = S.mOpen === d.id;
+    h += `<div class="stock" onclick="S.mOpen=${open ? "null" : `'${d.id}'`};renderPrehlad()"><span>${esc(d.name)}</span>
+      <span class="n num ${r.close < 0 ? "neg" : ""}">${r.missing ? "–" : fmtS(r.close)}</span></div>`;
+    if (open && !r.missing) h += `<div class="detail">${formula(r, endLabel, loc)}</div>`;
+  });
+  h += `</div>`;
+  const gso = loc ? [] : ok.filter(x => x.r.gsoInv), gt = gso.reduce((s, x) => s + x.r.gsoInv, 0);
+  if (gt) h += `<div class="card"><details><summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:600"><span>Faktúra GSO</span><span class="num">${fmtN(gt)} ks</span></summary>
+    <table class="t" style="margin-top:10px"><tr><th>Nápoj</th><th>Shopify</th><th>Mimo</th><th>Prop.</th><th>Spolu</th></tr>
+    ${gso.map(({ d, r }) => `<tr><td>${esc(d.name)}</td><td>${fmtN(r.shopify)}</td><td>${fmtN(r.mimo)}</td><td>${fmtN(r.propagacia)}</td><td><b>${fmtN(r.gsoInv)}</b></td></tr>`).join("")}</table>
+    <button class="secondary block" onclick="copyGso()">Kopírovať</button></details></div>`;
+  el.innerHTML = h + syncInfo();
+}
+function copyGso(){
+  const from = S.month + "-01", to = nextMonth(S.month) + "-01", L = buildLedger();
+  const lines = drinks().map(d => ({ d, r:calc(L[d.id], from, to) })).filter(x => !x.r.missing && x.r.gsoInv).map(x => `${x.d.name}\t${x.r.gsoInv}`);
+  navigator.clipboard.writeText(`Faktúra GSO ${monthName(S.month)}\n` + lines.join("\n")).then(() => toast("Skopírované"), () => toast("Kopírovanie sa nepodarilo"));
+}
+
+function qtyList(prefix, values = {}){
+  let h = `<div class="qty">`;
+  groups(drinks()).forEach(([g, list]) => {
+    h += `<div class="grp">${esc(g)}</div>`;
+    list.forEach(d => { h += `<div class="it"><span>${esc(d.name)}</span>
+      <input type="number" inputmode="numeric" min="0" id="${prefix}-${d.id}" value="${values[d.id] ?? ""}" placeholder="–" oninput="qtyTotal('${prefix}')"></div>`; });
+  });
+  return h + `</div><div class="total"><span>Spolu</span><span class="num" id="${prefix}-total">0</span></div>`;
+}
+function qtyRead(prefix, required, keepZero){
+  const out = {}; let bad = false;
+  drinks().forEach(d => { const v = $(`${prefix}-${d.id}`).value.trim();
+    if (v === "") { if (required) bad = true; return; }
+    const n = Math.round(Number(v)); if (!Number.isFinite(n) || n < 0) { bad = true; return; }
+    if (n > 0 || required || keepZero) out[d.id] = n; });
+  return bad ? null : out;
+}
+function qtyTotal(prefix){ let t = 0; drinks().forEach(d => { t += Number($(`${prefix}-${d.id}`).value) || 0; }); $(`${prefix}-total`).textContent = fmtN(t); }
+
+function renderZadat(){
+  const el = $("screen-zadat");
+  if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
+  const first = !counts().length; if (first) S.entry = "inv";
+  const E = S.entry, T = OUT[S.outType], ol = S.outLoc || T.loc;
+  const sel = (label, onch, opts, cur, top) => `<label${top ? ` style="margin-top:0"` : ""}>${label}</label><select onchange="${onch}">${opts.map(([k, l]) =>
+    `<option value="${k}" ${k === cur ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  let h = `<div class="seg">${[["prijem","Príjem"],["vydaj","Výdaj"],["presun","Presun"],["inv","Inventúra"]].map(([k, l]) =>
+    `<button class="${k === E ? "on" : ""}" onclick="S.entry='${k}';S.lastInv=null;renderZadat()">${l}</button>`).join("")}</div><div class="card">`;
+  if (E === "vydaj") h += sel("Druh", "S.outType=this.value;S.outLoc=null;renderZadat()", Object.entries(OUT).map(([k, o]) => [k, o.label]), S.outType, true)
+    + sel("Miesto", "S.outLoc=this.value", Object.entries(LOCS), ol);
+  if (E === "presun") h += sel("Smer", "S.trFrom=this.value", [["ppp","PPP → GSO"],["gso","GSO → PPP"]], S.trFrom, true);
+  h += `<label ${E === "vydaj" || E === "presun" ? "" : `style="margin-top:0"`}>Dátum</label><input type="date" id="z-date" value="${todayISO()}" min="${startDate()}">`;
+  if (E !== "inv") h += `<label>${E === "vydaj" ? T.field : "Poznámka"}</label><input type="text" id="z-note" placeholder="${E === "vydaj" ? T.ph : "nepovinné"}">`;
+  if (first) h += `<p class="muted">Počiatočná inventúra: vyplň všetky nápoje.</p>`;
+  if (E === "inv") h += `<label>Miesto</label><div class="seg" style="margin:0">${[["ppp","PPP"],["gso","GSO"],["both","Obe miesta"]].map(([k, l]) =>
+    `<button class="${k === S.invLoc ? "on" : ""}" onclick="S.invLoc='${k}';renderZadat()">${l}</button>`).join("")}</div>`;
+  h += E === "inv" ? `<label>Napočítané</label>${qtyList2("z")}` : `<label>Počet</label>${qtyList("z")}`;
+  h += `<button class="block" onclick="saveZadat()">Uložiť</button></div>`;
+  if (E === "inv" && S.lastInv) h += invTable(S.data.counts.find(c => c.id === S.lastInv));
+  el.innerHTML = h; if (E === "inv") qtyTotal2("z"); else qtyTotal("z");
+}
+const invLocs = () => S.invLoc === "both" ? Object.keys(LOCS) : [S.invLoc];
+function qtyList2(prefix){
+  const ls = invLocs();
+  let h = `<div class="qty">${ls.length > 1 ? `<div class="it" style="border:none;padding-bottom:0"><span></span>${ls.map(l => `<b class="muted" style="width:80px;text-align:center">${LOCS[l]}</b>`).join("")}</div>` : ""}`;
+  groups(drinks()).forEach(([g, list]) => {
+    h += `<div class="grp">${esc(g)}</div>`;
+    list.forEach(d => { h += `<div class="it"><span>${esc(d.name)}</span>${ls.map(l =>
+      `<input type="number" inputmode="numeric" min="0" id="${prefix}-${l}-${d.id}" placeholder="–" style="width:80px" oninput="qtyTotal2('${prefix}')">`).join("")}</div>`; });
+  });
+  return h + `</div><div class="total"><span>Spolu</span><span class="num" id="${prefix}-total">0</span></div>`;
+}
+function qtyTotal2(prefix){ let t = 0; drinks().forEach(d => invLocs().forEach(l => { t += Number($(`${prefix}-${l}-${d.id}`).value) || 0; })); $(`${prefix}-total`).textContent = fmtN(t); }
+async function saveZadat(){
+  const E = S.entry, date = $("z-date").value, note = $("z-note") ? $("z-note").value.trim() : "";
+  if (!date) return toast("Zadaj dátum");
+  if (date < startDate()) return toast(`Evidencia začína ${fmtDs(startDate())}, starší dátum nejde zadať`);
+  if (E === "inv") {
+    const first = !counts().length, byLoc = {};
+    for (const d of drinks()) for (const l of invLocs()) {
+      const v = $(`z-${l}-${d.id}`).value.trim();
+      if (v === "") { if (first) return toast("Vyplň všetky nápoje"); continue; }
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n) || n < 0) return toast(`${d.name}: neplatný počet`);
+      (byLoc[l] = byLoc[l] || {})[d.id] = n;
+    }
+    if (!Object.keys(byLoc).length) return toast("Zadaj aspoň jeden nápoj");
+    if (counts()[0] && date < counts()[0].date) return toast("Dátum je pred počiatočnou inventúrou");
+    const same = S.data.counts.find(x => x.date === date);
+    if (same && Object.keys(byLoc).some(l => same.loc && same.loc[l] && Object.keys(byLoc[l]).some(id => id in same.loc[l]))
+      && !confirm(`Inventúra z ${fmtD(date)} už má počty na tomto mieste. Prepísať ich?`)) return;
+    const id = same ? same.id : uid();
+    const ok = await mutate(() => {
+      const c = same || { id, date, counts:{}, loc:{}, ...stamp() };
+      if (!c.loc) c.loc = { ppp:{ ...c.counts } };
+      Object.entries(byLoc).forEach(([l, v]) => { c.loc[l] = { ...(c.loc[l] || {}), ...v }; });
+      c.counts = {};
+      Object.values(c.loc).forEach(v => Object.entries(v).forEach(([d, n]) => { c.counts[d] = (c.counts[d] || 0) + n; }));
+      if (!same) S.data.counts.push(c);
+    }, same ? "Inventúra doplnená" : "Inventúra uložená");
+    if (ok) { S.lastInv = id; renderZadat(); }
+    return;
+  }
+  const q = qtyRead("z");
+  if (!q || !Object.keys(q).length) return toast("Zadaj aspoň jeden počet");
+  if (E === "prijem") {
+    const batch = uid();
+    await mutate(() => Object.entries(q).forEach(([drinkId, qty]) => S.data.receipts.push({ id:uid(), batch, date, drinkId, qty, note, loc:"ppp", ...stamp() })), "Príjem uložený");
+  } else if (E === "presun") {
+    const from = S.trFrom, to = otherLoc(from);
+    await mutate(() => S.data.transfers.push({ id:uid(), date, from, to, items:q, note, ...stamp() }), `Presun ${LOCS[from]} → ${LOCS[to]} uložený`);
+  } else {
+    if (!note) return toast("Vyplň " + OUT[S.outType].field.toLowerCase());
+    const loc = S.outLoc || OUT[S.outType].loc;
+    await mutate(() => S.data.outs.push({ id:uid(), type:S.outType, date, label:note, items:q, loc, ...stamp() }), OUT[S.outType].label + " uložené");
+  }
+}
+function invTable(c){
+  if (!c) return "";
+  const L = buildLedger(), rows = S.data.drinks.filter(d => c.counts[d.id] != null).map(d => ({ d, a:L[d.id].adj.find(a => a.countId === c.id) }));
+  if (c.loc) {
+    const LL = Object.fromEntries(Object.keys(LOCS).map(l => [l, buildLedger(l)]));
+    const cell = a => a ? `<td class="${diffCls(a.diff)}">${a.diff ? fmtS(a.diff) : "0"}</td>` : `<td class="muted">–</td>`;
+    const any = rows.some(x => x.a);
+    if (!any) return `<div class="card muted">Počiatočný stav ${fmtD(c.date)}.</div>`;
+    return `<div class="card"><table class="t"><tr><th>Rozdiel</th>${Object.values(LOCS).map(l => `<th>${l}</th>`).join("")}<th>Spolu</th></tr>` + rows.map(({ d, a }) =>
+      `<tr><td>${esc(d.name)}</td>${Object.keys(LOCS).map(l => cell(LL[l][d.id].adj.find(x => x.countId === c.id))).join("")}${cell(a)}</tr>`
+      + (a && a.diff ? `<tr class="det"><td colspan="4"><input type="text" placeholder="Dôvod rozdielu" value="${esc(a.note)}" onclick="event.stopPropagation()" onchange="setNote('${c.id}','${d.id}',this.value)"></td></tr>` : "")).join("") + `</table></div>`;
+  }
+  if (rows.every(x => !x.a)) return `<div class="card muted">Počiatočný stav ${fmtD(c.date)}.</div>`;
+  return `<div class="card"><table class="t"><tr><th>Nápoj</th><th>Evidované</th><th>Napočítané</th><th>Rozdiel</th></tr>` + rows.map(({ d, a }) =>
+    `<tr><td>${esc(d.name)}</td><td>${a ? fmtS(a.book) : "–"}</td><td>${fmtN(c.counts[d.id])}</td><td class="${a ? diffCls(a.diff) : ""}">${a ? (a.diff ? fmtS(a.diff) : "0") : "–"}</td></tr>`
+    + (a && a.diff ? `<tr class="det"><td colspan="4"><input type="text" placeholder="Dôvod rozdielu" value="${esc(a.note)}" onclick="event.stopPropagation()" onchange="setNote('${c.id}','${d.id}',this.value)"></td></tr>` : "")).join("") + `</table></div>`;
+}
+async function setNote(countId, drinkId, v){
+  await mutate(() => { const c = S.data.counts.find(x => x.id === countId); c.notes = c.notes || {};
+    if (v.trim()) c.notes[drinkId] = v.trim(); else delete c.notes[drinkId]; }, "Uložené");
+}
+
+const P_FILTERS = [["all","Všetko"],["prijem","Doskladnené"],["shoptet","Shoptet"],["shopify","Shopify"],["propagacia","Propagácia"],["mimo","Predaj mimo Shopify"],["odpis","Odpisy"],["presun","Presun"],["inv","Inventúra"]];
+function movements(from, to){
+  const vis = new Set(drinks().map(d => d.id)), inP = x => x >= from && x >= startDate() && x < to, E = [];
+  const items = obj => Object.fromEntries(Object.entries(obj).filter(([id, n]) => vis.has(id) && n));
+  const by = {};
+  S.data.receipts.filter(r => inP(r.date)).forEach(r => { const k = r.batch || r.id;
+    const x = by[k] = by[k] || { key:"r" + k, kind:"prijem", date:r.date, title:"Doskladnené", sub:r.note || "", loc:r.loc || "ppp", items:{}, sign:1, del:`delPrijem('${esc(k)}')` };
+    x.items[r.drinkId] = (x.items[r.drinkId] || 0) + r.qty; });
+  E.push(...Object.values(by));
+  S.data.outs.filter(o => inP(o.date)).forEach(o => E.push({ key:"o" + o.id, kind:o.type, date:o.date, title:OUT[o.type].label, sub:o.label, loc:outLoc(o), items:o.items, sign:-1, del:`delVydaj('${o.id}')` }));
+  const sh = {}; salesFor().sh.filter(l => !l.gso && inP(l.d)).forEach(l => {
+    const x = sh[l.o] = sh[l.o] || { key:"s" + l.o, kind:"shoptet", date:l.d, title:`Shoptet ${l.o}`, sub:l.c, loc:"ppp", items:{}, sign:-1 };
+    x.items[l.drinkId] = (x.items[l.drinkId] || 0) + l.q; });
+  E.push(...Object.values(sh));
+  const byKey = {}; S.data.drinks.forEach(d => { byKey[norm(d.key)] = d.id; });
+  const sf = {}; ((S.sales || {}).shopifyOrders || []).filter(l => inP(l.d) && byKey[norm(l.k)]).forEach(l => {
+    const x = sf[l.o] = sf[l.o] || { key:"f" + l.o, kind:"shopify", date:l.d, title:`Shopify ${l.o}`, sub:l.c, loc:shopifyLocOf(l), order:l.o, items:{}, sign:-1 };
+    x.items[byKey[norm(l.k)]] = (x.items[byKey[norm(l.k)]] || 0) + l.q; });
+  E.push(...Object.values(sf));
+  S.data.transfers.filter(t => inP(t.date)).forEach(t => E.push({ key:"t" + t.id, kind:"presun", date:t.date, title:`Presun ${LOCS[t.from]} → ${LOCS[t.to]}`,
+    sub:t.note || "", items:t.items, sign:0, del:`delPresun('${t.id}')` }));
+  const L = buildLedger();
+  S.data.counts.filter(c => inP(c.date)).forEach(c => {
+    const adj = {}; S.data.drinks.forEach(d => { const a = L[d.id].adj.find(a => a.countId === c.id); if (a && a.diff) adj[d.id] = a.diff; });
+    E.push({ key:"c" + c.id, kind:"inv", date:c.date, title:"Inventúra", sub:"", items:adj, sign:1, count:c, del:`delInventura('${c.id}')` });
+  });
+  E.forEach(e => { e.items = items(e.items); e.qty = Object.values(e.items).reduce((s, n) => s + n, 0); e.total = e.qty * e.sign; });
+  return E.filter(e => e.kind === "inv" || e.qty).sort((a, b) => b.date.localeCompare(a.date) || (a.kind === "inv") - (b.kind === "inv") || a.kind.localeCompare(b.kind));
+}
+function renderPohyby(){
+  const el = $("screen-pohyby");
+  if (!S.data.drinks.length) { el.innerHTML = onboarding(); return; }
+  monthsList();
+  const from = S.month + "-01", to = nextMonth(S.month) + "-01";
+  const all = movements(from, to), list = S.pFilter === "all" ? all : all.filter(e => e.kind === S.pFilter);
+  let h = `<div class="bar">${monthSelect("renderPohyby")}</div>
+    <div class="chips">${P_FILTERS.map(([k, l]) => `<button class="${k === S.pFilter ? "on" : ""}" onclick="S.pFilter='${k}';S.pOpen=null;renderPohyby()">${l}</button>`).join("")}</div><div class="card">`;
+  if (!list.length) h += `<div class="empty">Žiadne pohyby.</div>`;
+  list.forEach(e => {
+    const open = S.pOpen === e.key, names = Object.entries(e.items).map(([id, n]) => `${esc(drinkById(id).name)} ${e.kind === "inv" ? fmtS(n) : fmtN(n)}`).join(", ");
+    const cls = e.kind === "inv" ? (e.total < 0 ? "bad" : e.total > 0 ? "plus" : "") : e.sign > 0 ? "plus" : "minus";
+    h += `<div class="mv" onclick="S.pOpen=${open ? "null" : `'${esc(e.key)}'`};renderPohyby()"><div class="l"><b>${esc(e.title)}</b>${e.sub ? ` · ${esc(e.sub)}` : ""}
+      <div class="muted">${fmtDs(e.date)}${e.loc && e.kind !== "shopify" ? " · " + LOCS[e.loc] : ""}${names && !open ? " · " + names : ""}</div></div>
+      <div class="r ${cls}${e.kind === "shopify" ? " withsel" : ""}">${e.kind === "shopify" ? `<select class="locsel ${e.loc}" onclick="event.stopPropagation()" onchange="setShopifyLoc('${esc(e.order)}',this.value)">${Object.entries(LOCS).map(([k, l]) =>
+        `<option value="${k}" ${k === e.loc ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}${e.kind === "inv" ? (e.total ? fmtS(e.total) : "sedí") : e.kind === "presun" ? fmtN(e.qty) : (e.sign > 0 ? "+" : "−") + fmtN(Math.abs(e.total))}</div></div>`;
+    if (open) h += `<div class="mv-det">${e.kind === "inv" ? invTable(e.count).replace(/^<div class="card">|<\/div>$/g, "")
+      : Object.entries(e.items).map(([id, n]) => ln(esc(drinkById(id).name), fmtN(n))).join("")}
+
+      ${e.del ? `<button class="del" style="padding-left:0;margin-top:6px" onclick="event.stopPropagation();${e.del}">Zmazať</button>` : ""}</div>`;
+  });
+  el.innerHTML = h + `</div>` + syncInfo();
+}
+async function setShopifyLoc(o, loc){
+  const fromShopify = (((S.sales || {}).shopifyOrders || []).find(l => l.o === o) || {}).loc || "ppp";
+  await mutate(() => { if (loc === fromShopify) delete S.data.shopifyLoc[o]; else S.data.shopifyLoc[o] = loc; }, `${o}: odoslané z ${LOCS[loc]}`);
+}
+async function setStartDate(v){
+  if (!confirm(v ? `Appka bude počítať len od ${fmtDs(v)}. Pokračovať?` : "Appka bude počítať celú históriu. Pokračovať?")) return renderNastavenia();
+  await mutate(() => { if (v) S.data.startDate = v; else delete S.data.startDate; }, "Uložené");
+}
+async function delPresun(id){
+  if (!confirm("Zmazať tento presun?")) return;
+  await mutate(() => { S.data.transfers = S.data.transfers.filter(x => x.id !== id); }, "Zmazané");
+}
+async function delPrijem(b){
+  if (!confirm("Zmazať tento príjem?")) return;
+  await mutate(() => { S.data.receipts = S.data.receipts.filter(r => (r.batch || r.id) !== b); }, "Zmazané");
+}
+async function delVydaj(id){
+  if (!confirm("Zmazať tento výdaj?")) return;
+  await mutate(() => { S.data.outs = S.data.outs.filter(x => x.id !== id); }, "Zmazané");
+}
+async function delInventura(id){
+  if (!confirm("Zmazať túto inventúru?")) return;
+  await mutate(() => { S.data.counts = S.data.counts.filter(x => x.id !== id); }, "Zmazané");
+}
+
+const LIST = { firmy:"Companies", kontakty:"Contacts", hist:"CRM historia" };
+const CF = { name:"Title", lastContact:"field_0", distributor:"field_2", weight:"field_3", area:"field_4", source:"field_5", pricelist:"field_6",
+  address:"field_7", city:"field_8", next:"field_9", notes:"field_10", status:"field_11", owner:"Owner", tag:"Tag", ico:"ICO" };
+const STATUS = ["Lead","SQL","Deal","No Lead","On Hold"];
+const STATUS_CLS = { "Lead":"ppp", "SQL":"sql", "Deal":"ok", "No Lead":"neu", "On Hold":"warn" };
+const HIST_TYPES = ["Hovor","Stretnutie","E-mail","Iné"];
+const C = { choices:{}, loaded:false, loading:null, firmy:[], kontakty:[], hist:[], noHist:false, q:"", status:"", owner:"", kq:"", open:null, edit:null, kedit:null, kfirm:null };
+try { C.owner = localStorage.getItem("crm_owner") || ""; } catch(e){}
+
+const listUrl = l => `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${encodeURIComponent(l)}/items`;
+const GraphLists = {
+  async all(l){
+    await siteId(); let url = listUrl(l) + "?expand=fields&$top=999", out = [];
+    while (url) {
+      const r = await gfetch(url);
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`Zoznam ${l} (${r.status})`);
+      const j = await r.json(); out = out.concat(j.value.map(it => ({ ...it.fields, id:it.id }))); url = j["@odata.nextLink"];
+    }
+    return out;
+  },
+  async choices(l){
+    await siteId(); const r = await gfetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${encodeURIComponent(l)}/columns?$select=name,choice`);
+    if (!r.ok) return {};
+    return Object.fromEntries((await r.json()).value.filter(c => c.choice).map(c => [c.name, c.choice.choices || []]));
+  },
+  async update(l, id, fields){
+    const r = await gfetch(`${listUrl(l)}/${id}/fields`, { method:"PATCH", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(fields) });
+    if (!r.ok) throw new Error(`Uloženie (${r.status}) ${(await r.text()).slice(0, 120)}`);
+    return await r.json();
+  },
+  async create(l, fields){
+    const r = await gfetch(listUrl(l), { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ fields }) });
+    if (!r.ok) throw new Error(`Uloženie (${r.status}) ${(await r.text()).slice(0, 120)}`);
+    const j = await r.json(); return { ...j.fields, id:j.id };
+  }
+};
+const DemoLists = {
+  get(l){ try { const v = localStorage.getItem("crm_demo:" + l); if (v) return JSON.parse(v); } catch(e){} return (window.__crm = window.__crm || {})[l] || seedCrm()[l]; },
+  put(l, v){ try { localStorage.setItem("crm_demo:" + l, JSON.stringify(v)); } catch(e){ (window.__crm = window.__crm || {})[l] = v; } },
+  async all(l){ return this.get(l); },
+  async choices(){ return {}; },
+  async update(l, id, fields){ const a = this.get(l), x = a.find(i => i.id === id); Object.assign(x, fields);
+    if (fields.ContactsLookupId) x.Contacts = fields.ContactsLookupId.map(i => ({ LookupId:i })); this.put(l, a); return x; },
+  async create(l, fields){ const a = this.get(l), x = { ...fields, id:String(Date.now()) }; a.push(x); this.put(l, a); return x; }
+};
+const Lists = DEMO ? DemoLists : GraphLists;
+
+async function loadCrm(force){
+  if (C.loaded && !force) return;
+  if (!C.loading) C.loading = (async () => {
+    const [f, k, h, ch] = await Promise.all([Lists.all(LIST.firmy), Lists.all(LIST.kontakty), Lists.all(LIST.hist), Lists.choices(LIST.firmy)]);
+    C.choices = ch; C.firmy = f || []; C.kontakty = k || []; C.hist = h || []; C.noHist = h === null; C.loaded = true;
+  })().finally(() => { C.loading = null; });
+  await C.loading;
+}
+async function crmSave(fn, okMsg){
+  try { await fn(); if (okMsg) toast(okMsg); renderAll(); return true; }
+  catch(e){ toast("Chyba: " + e.message); return false; }
+}
+
+const dLocal = v => { if (!v) return ""; const d = new Date(v); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const dWrite = v => v ? v + "T12:00:00Z" : null;
+const firmById = id => C.firmy.find(f => f.id === id);
+const contactById = id => C.kontakty.find(k => String(k.id) === String(id));
+const contactsOf = f => (f.Contacts || []).map(c => contactById(c.LookupId)).filter(Boolean);
+const firmsOfContact = k => C.firmy.filter(f => (f.Contacts || []).some(c => String(c.LookupId) === String(k.id)));
+const kName = k => [k.field_1, k.Title].filter(Boolean).join(" ");
+function telOf(k){
+  if (k.Telefon) return k.Telefon;
+  if (k.field_2 == null) return "";
+  const d = String(Math.round(k.field_2));
+  if (d.length === 9) return `+421 ${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  if (d.length === 12 && /^42[01]/.test(d)) return `+${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6, 9)} ${d.slice(9)}`;
+  return d;
+}
+const optionsOf = field => [...new Set([...(C.choices[field] || []), ...C.firmy.map(f => f[field]).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "sk"));
+const statusChip = s => s ? `<span class="chip ${STATUS_CLS[s] || "neu"}">${esc(s)}</span>` : "";
+const coNorm = s => norm(s).replace(/[.,]/g, "").replace(/(spolsro|sro|as|vos|ks)$/, "");
+function nextBadge(f){
+  const n = dLocal(f[CF.next]); if (!n) return "";
+  const t = todayISO(), cls = n < t ? "bad" : n === t ? "warn" : "";
+  return `<div class="muted num" style="${cls === "bad" ? "color:var(--danger);font-weight:600" : cls === "warn" ? "color:var(--warn);font-weight:600" : ""}">${fmtDs(n)}</div>`;
+}
+function firmRow(f){
+  return `<div class="mv" onclick="openFirm('${f.id}')"><div class="l"><b>${esc(f[CF.name])}</b>
+    <div class="muted">${[f[CF.city], f[CF.owner]].filter(Boolean).map(esc).join(" · ")}</div></div>
+    <div class="r" style="text-align:right;font-weight:400">${statusChip(f[CF.status])}${nextBadge(f)}</div></div>`;
+}
+function openFirm(id){ C.open = id; C.pick = null; go("crm-firma"); }
+const crmWait = el => { el.innerHTML = `<div class="center" style="min-height:40vh"><div class="spinner"></div></div>`; };
+function crmGuard(el, render){
+  if (C.loaded) return true;
+  crmWait(el); loadCrm().then(render).catch(e => { el.innerHTML = `<div class="card note bad">Chyba pri načítaní CRM: ${esc(e.message)}</div>`; });
+  return false;
+}
+const ownerSelect = rerender => `<select onchange="C.owner=this.value;try{localStorage.setItem('crm_owner',this.value)}catch(e){};${rerender}()">
+  <option value="">Všetci</option>${optionsOf(CF.owner).map(o => `<option ${o === C.owner ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+
+function renderCrmDnes(){
+  const el = $("screen-crm-dnes"); if (!crmGuard(el, renderCrmDnes)) return;
+  const t = todayISO(), wk = addDays(t, 7);
+  const list = C.firmy.filter(f => dLocal(f[CF.next]) && dLocal(f[CF.next]) <= wk && (!C.owner || f[CF.owner] === C.owner))
+    .sort((a, b) => dLocal(a[CF.next]).localeCompare(dLocal(b[CF.next])));
+  const grp = [["Po termíne", f => dLocal(f[CF.next]) < t], ["Dnes", f => dLocal(f[CF.next]) === t], ["Do 7 dní", f => dLocal(f[CF.next]) > t]];
+  let h = `<div class="bar"><h2 style="margin:0 4px;font-size:22px">Na dnes</h2>${ownerSelect("renderCrmDnes")}</div>`;
+  if (!list.length) h += `<div class="card empty">Nikomu netreba volať.</div>`;
+  grp.forEach(([l, fn]) => { const g = list.filter(fn); if (g.length) h += `<div class="card"><h3>${l} (${g.length})</h3>${g.map(firmRow).join("")}</div>`; });
+  el.innerHTML = h;
+}
+
+const GROUPS = [["status","Stav"],["owner","Vlastník"],["weight","Váha klienta"],["area","Oblasť"],["city","Mesto"],["pricelist","Cenník"],["source","Zdroj"],["none","Bez zoskupenia"]];
+try { C.view = localStorage.getItem("crm_view") || "list"; C.group = localStorage.getItem("crm_group") || "status"; } catch(e){ C.view = "list"; C.group = "status"; }
+function groupFirms(list, key){
+  if (key === "none") return [["", list]];
+  const field = CF[key], g = {};
+  list.forEach(f => { const v = f[field] || ""; (g[v] = g[v] || []).push(f); });
+  if (key === "status") STATUS.forEach(s => { g[s] = g[s] || []; });
+  const order = key === "status" ? s => { const i = STATUS.indexOf(s); return i < 0 ? 99 : i; } : null;
+  return Object.entries(g).sort((a, b) => !a[0] ? 1 : !b[0] ? -1 : order ? order(a[0]) - order(b[0]) : a[0].localeCompare(b[0], "sk"));
+}
+function renderCrmFirmy(){
+  const el = $("screen-crm-firmy"); if (!crmGuard(el, renderCrmFirmy)) return;
+  const q = norm(C.q), kan = C.view === "kanban";
+  if (kan && C.group === "none") C.group = "status";
+  document.querySelector("main").classList.toggle("wide", kan);
+  const list = C.firmy.filter(f => (!C.status || f[CF.status] === C.status) && (!C.owner || f[CF.owner] === C.owner)
+    && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)))
+    .sort((a, b) => (a[CF.name] || "").localeCompare(b[CF.name] || "", "sk"));
+  const save = (k, v) => `C.${k}=this.value;try{localStorage.setItem('crm_${k}',this.value)}catch(e){};renderCrmFirmy()`;
+  let h = `<div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.q)}" oninput="C.q=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirmy();const i=document.querySelector('#screen-crm-firmy input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)">
+    <button class="small" style="flex:0 0 auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
+    <div class="bar" style="flex-wrap:wrap"><div class="seg" style="margin:0">${[["list","Zoznam"],["kanban","Kanban"]].map(([k, l]) =>
+      `<button class="${k === C.view ? "on" : ""}" onclick="C.view='${k}';try{localStorage.setItem('crm_view','${k}')}catch(e){};renderCrmFirmy()">${l}</button>`).join("")}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto">
+    <select onchange="${save("group")}">${GROUPS.filter(([k]) => !(kan && k === "none")).map(([k, l]) => `<option value="${k}" ${k === C.group ? "selected" : ""}>${kan ? "Stĺpce" : "Skupiny"}: ${l}</option>`).join("")}</select>
+    ${C.group === "status" ? "" : `<select onchange="C.status=this.value;renderCrmFirmy()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.status ? "selected" : ""}>${s}</option>`).join("")}</select>`}
+    ${C.group === "owner" ? "" : ownerSelect("renderCrmFirmy")}</div></div>`;
+  const G = groupFirms(list, C.group), label = v => v || "(bez hodnoty)";
+  if (kan) {
+    h += `<div class="kanban">${G.map(([v, fs]) => `<div class="kcol" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
+      ondrop="this.classList.remove('over');dropFirm(event,'${esc(v)}')"><div class="khead">${C.group === "status" ? statusChip(v) || label(v) : esc(label(v))}<span class="muted">${fs.length}</span></div>
+      ${fs.map(f => `<div class="kcard" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${f.id}')" onclick="openFirm('${f.id}')">
+        <b>${esc(f[CF.name])}</b><div class="muted">${[f[CF.city], C.group === "owner" ? f[CF.status] : f[CF.owner]].filter(Boolean).map(esc).join(" · ")}</div>${nextBadge(f)}</div>`).join("")}</div>`).join("")}</div>
+      <p class="muted" style="text-align:center">Na počítači presunieš firmu do iného stĺpca ťahaním.</p>`;
+  } else {
+    h += G.filter(([, fs]) => fs.length).map(([v, fs]) => `<div class="card">${C.group === "none" ? "" : `<h3>${C.group === "status" ? statusChip(v) || label(v) : esc(label(v))} <span class="muted" style="text-transform:none">· ${fs.length}</span></h3>`}
+      ${fs.map(firmRow).join("")}</div>`).join("") || `<div class="card empty">Nič sa nenašlo.</div>`;
+  }
+  el.innerHTML = h + `<p class="muted" style="text-align:center">${list.length} z ${C.firmy.length}</p>`;
+}
+async function dropFirm(ev, value){
+  ev.preventDefault();
+  const id = ev.dataTransfer.getData("text/plain"), f = firmById(id), field = CF[C.group];
+  if (!f || (f[field] || "") === value) return;
+  await crmSave(async () => { Object.assign(f, await Lists.update(LIST.firmy, id, { [field]:value || null })); }, `${f[CF.name]}: ${value || "bez hodnoty"}`);
+}
+
+function firmSales(f){
+  const ico = (f[CF.ico] || "").replace(/\s/g, ""), n = coNorm(f[CF.name]), o = {};
+  const s = S.sales || {};
+  (s.shoptet || []).filter(l => !l.gso && ((ico && l.i === ico) || coNorm(l.c) === n)).forEach(l => {
+    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+  (s.shopifyOrders || []).filter(l => coNorm(l.c) === n).forEach(l => {
+    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+  return Object.values(o).sort((a, b) => b.d.localeCompare(a.d));
+}
+
+function renderCrmFirma(){
+  const el = $("screen-crm-firma"); if (!crmGuard(el, renderCrmFirma)) return;
+  const f = firmById(C.open); if (!f) { go("crm-firmy"); return; }
+  const kk = contactsOf(f), sales = firmSales(f), hist = C.hist.filter(x => String(x.FirmaId) === String(f.id)).sort((a, b) => (b.Datum || "").localeCompare(a.Datum || ""));
+  const row = (l, v) => v ? ln(l, esc(v)) : "";
+  let h = `<div class="title"><button class="link" style="padding-left:0" onclick="go(C.back||'crm-firmy')">‹ Späť</button><button class="link" onclick="C.edit='${f.id}';go('crm-edit')">Upraviť</button></div>
+    <div class="card"><h2 style="margin:0 0 6px;font-size:20px">${esc(f[CF.name])}</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${statusChip(f[CF.status])}${[f[CF.owner], f[CF.weight], f[CF.area]].filter(Boolean).map(x => `<span class="chip neu">${esc(x)}</span>`).join("")}</div>
+    ${row("Ďalší kontakt", dLocal(f[CF.next]) && fmtD(dLocal(f[CF.next])))}${row("Posledný kontakt", dLocal(f[CF.lastContact]) && fmtD(dLocal(f[CF.lastContact])))}
+    ${row("IČO", f[CF.ico])}${row("Adresa", [f[CF.address], f[CF.city]].filter(Boolean).join(", "))}${row("Cenník", f[CF.pricelist])}${row("Zdroj", f[CF.source])}${row("Distribútor", f[CF.distributor])}</div>`;
+  h += `<div class="card"><h3>Kontakty</h3>${kk.map(k => { const tel = telOf(k);
+      return `<div class="mv" onclick="C.kedit='${k.id}';C.kfirm='${f.id}';go('crm-kedit')"><div class="l"><b>${esc(kName(k))}</b>${k.field_5 ? `<div class="muted">${esc(k.field_5)}</div>` : ""}
+      <div style="margin-top:4px">${tel ? `<a href="tel:${tel.replace(/\s/g, "")}" onclick="event.stopPropagation()">${esc(tel)}</a>` : ""}${tel && k.field_3 ? " · " : ""}${k.field_3 ? `<a href="mailto:${esc(k.field_3)}" onclick="event.stopPropagation()">${esc(k.field_3)}</a>` : ""}</div></div></div>`; }).join("") || `<div class="muted">Žiadne kontakty.</div>`}
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="small secondary" onclick="C.kedit='new';C.kfirm='${f.id}';go('crm-kedit')">+ Nový kontakt</button>
+    <button class="small secondary" onclick="C.pick=C.pick==null?'':null;renderCrmFirma()">+ Existujúci kontakt</button></div>
+    ${C.pick != null ? contactPicker(f) : ""}</div>`;
+  const total = sales.reduce((s, x) => s + x.q, 0);
+  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Posledná objednávka", fmtD(sales[0].d))}
+    <table class="t" style="margin-top:8px">${sales.slice(0, 6).map(x => `<tr><td>${fmtDs(x.d)} <span class="muted">${x.src} ${esc(x.o)}</span></td><td>${fmtN(x.q)}</td></tr>`).join("")}</table>`
+    : `<div class="muted">${f[CF.ico] ? "Žiadne objednávky." : "Žiadne objednávky. Doplň IČO, aby sa objednávky zo Shoptetu spárovali spoľahlivo."}</div>`}</div>`;
+  h += `<div class="card"><h3>História</h3>${C.noHist ? `<div class="note">Zoznam „CRM historia“ v SharePointe ešte neexistuje.</div>` : `
+    <div class="row"><select id="h-typ">${HIST_TYPES.map(t => `<option>${t}</option>`).join("")}</select><input type="date" id="h-next" value="${dLocal(f[CF.next])}" title="Ďalší kontakt"></div>
+    <textarea id="h-text" placeholder="Čo sa dohodlo" style="width:100%;margin-top:8px;min-height:70px;padding:10px 12px;font:inherit;font-size:16px;border:1px solid var(--border);border-radius:10px"></textarea>
+    <div class="muted" style="margin-top:4px">Dátum vpravo hore je ďalší kontakt.</div>
+    <button class="block" style="margin-top:8px" onclick="saveHist('${f.id}')">Uložiť záznam</button>`}
+    ${hist.map(x => `<div class="entry" style="display:block"><div class="muted">${x.Datum ? fmtD(dLocal(x.Datum)) : ""} · ${esc(x.Typ || "")} · ${esc(x.Autor || "")}</div><div style="white-space:pre-wrap">${esc(x.Text || "")}</div></div>`).join("")}
+    ${f[CF.notes] ? `<details style="margin-top:10px"><summary class="muted" style="cursor:pointer">Staršie poznámky</summary><div style="white-space:pre-wrap;margin-top:6px">${esc(f[CF.notes])}</div></details>` : ""}</div>`;
+  el.innerHTML = h;
+}
+function contactPicker(f){
+  const linked = new Set((f.Contacts || []).map(c => String(c.LookupId))), q = norm(C.pick);
+  const list = C.kontakty.filter(k => !linked.has(String(k.id))).map(k => ({ k, fs:firmsOfContact(k) }))
+    .filter(({ k, fs }) => !q || norm([kName(k), k.field_3, ...fs.map(x => x[CF.name])].join(" ")).includes(q)).slice(0, 8);
+  return `<div style="margin-top:10px"><input type="text" id="pick-q" placeholder="Hľadať meno, e-mail alebo firmu" value="${esc(C.pick)}"
+    oninput="C.pick=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirma();const i=$('pick-q');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)">
+    ${list.map(({ k, fs }) => `<div class="mv" onclick="linkContact('${f.id}','${k.id}')"><div class="l"><b>${esc(kName(k))}</b>
+      <div class="muted">${[k.field_5, fs.map(x => x[CF.name]).join(", ")].filter(Boolean).map(esc).join(" · ")}</div></div><div class="r" style="color:var(--accent)">Pridať</div></div>`).join("")
+      || `<div class="muted" style="padding:8px 0">Nič sa nenašlo.</div>`}</div>`;
+}
+async function setFirmContacts(fid, ids){
+  const f = firmById(fid);
+  await Lists.update(LIST.firmy, fid, { "ContactsLookupId@odata.type":"Collection(Edm.Int32)", ContactsLookupId:ids.map(Number) });
+  f.Contacts = ids.map(i => ({ LookupId:Number(i) }));
+}
+async function linkContact(fid, kid){
+  const f = firmById(fid), ids = [...(f.Contacts || []).map(c => c.LookupId), kid];
+  C.pick = null;
+  await crmSave(() => setFirmContacts(fid, ids), `${kName(contactById(kid))} pridaný k firme`);
+}
+async function unlinkContact(){
+  const f = firmById(C.kfirm), k = contactById(C.kedit);
+  if (!confirm(`Odobrať ${kName(k)} z firmy ${f[CF.name]}? Kontakt ostane v zozname kontaktov.`)) return;
+  await crmSave(() => setFirmContacts(C.kfirm, (f.Contacts || []).map(c => c.LookupId).filter(i => String(i) !== String(C.kedit))), "Kontakt odobraný z firmy");
+  go("crm-firma");
+}
+async function saveHist(fid){
+  const f = firmById(fid), text = $("h-text").value.trim(), typ = $("h-typ").value, next = $("h-next").value;
+  if (!text) return toast("Napíš, čo sa dohodlo");
+  await crmSave(async () => {
+    const x = await Lists.create(LIST.hist, { Title:f[CF.name], FirmaId:Number(fid), Datum:dWrite(todayISO()), Typ:typ, Text:text, Autor:S.userName || S.user });
+    C.hist.push(x);
+    const upd = { [CF.lastContact]:dWrite(todayISO()), [CF.next]:dWrite(next) };
+    Object.assign(f, await Lists.update(LIST.firmy, fid, upd));
+  }, "Záznam uložený");
+}
+
+function renderCrmEdit(){
+  const el = $("screen-crm-edit"); if (!crmGuard(el, renderCrmEdit)) return;
+  const isNew = C.edit === "new", f = isNew ? { [CF.status]:"Lead", [CF.owner]:C.owner || "" } : firmById(C.edit);
+  const inp = (k, l, type = "text") => `<label>${l}</label><input type="${type}" id="e-${k}" value="${esc(type === "date" ? dLocal(f[CF[k]]) : f[CF[k]] || "")}">`;
+  const sel = (k, l, opts) => `<label>${l}</label><select id="e-${k}" style="width:100%"><option value=""></option>${opts.map(o => `<option ${o === f[CF[k]] ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  el.innerHTML = `<div class="title"><button class="link" style="padding-left:0" onclick="go(${isNew ? "'crm-firmy'" : "'crm-firma'"})">‹ Späť</button></div>
+    <div class="card"><h3>${isNew ? "Nová firma" : "Upraviť firmu"}</h3>${inp("name", "Názov")}${inp("ico", "IČO")}
+    ${sel("status", "Stav", STATUS)}${sel("owner", "Vlastník", optionsOf(CF.owner))}${inp("next", "Ďalší kontakt", "date")}
+    ${sel("weight", "Váha klienta", optionsOf(CF.weight))}${sel("area", "Oblasť pôsobenia", optionsOf(CF.area))}${sel("pricelist", "Cenník", optionsOf(CF.pricelist))}
+    ${sel("source", "Zdroj", optionsOf(CF.source))}${inp("distributor", "Distribútor")}
+    ${inp("address", "Adresa")}${inp("city", "Mesto")}
+    <button class="block" onclick="saveFirm()">Uložiť</button></div>`;
+}
+async function saveFirm(){
+  const isNew = C.edit === "new", keys = ["name","ico","status","owner","next","weight","area","pricelist","source","distributor","address","city"], fields = {};
+  keys.forEach(k => { const v = $("e-" + k).value.trim(); fields[CF[k]] = k === "next" ? dWrite(v) : (v || null); });
+  if (!fields[CF.name]) return toast("Zadaj názov");
+  await crmSave(async () => {
+    if (isNew) { const x = await Lists.create(LIST.firmy, fields); C.firmy.push(x); C.open = x.id; }
+    else Object.assign(firmById(C.edit), await Lists.update(LIST.firmy, C.edit, fields));
+    S.screen = "crm-firma";
+  }, "Uložené");
+  go("crm-firma");
+}
+
+function renderCrmKontakty(){
+  const el = $("screen-crm-kontakty"); if (!crmGuard(el, renderCrmKontakty)) return;
+  const q = norm(C.kq);
+  const list = C.kontakty.map(k => ({ k, f:firmsOfContact(k) })).filter(({ k, f }) => !q || norm([kName(k), k.field_3, k.field_5, telOf(k), ...f.map(x => x[CF.name])].join(" ")).includes(q))
+    .sort((a, b) => (a.k.Title || "").localeCompare(b.k.Title || "", "sk"));
+  el.innerHTML = `<div class="bar"><input type="text" placeholder="Hľadať meno, firmu, e-mail" value="${esc(C.kq)}" oninput="C.kq=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmKontakty();const i=document.querySelector('#screen-crm-kontakty input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
+    <div class="card">${list.map(({ k, f }) => { const tel = telOf(k);
+      return `<div class="mv" onclick="${f[0] ? `C.back='crm-kontakty';openFirm('${f[0].id}')` : `C.kedit='${k.id}';C.kfirm=null;go('crm-kedit')`}"><div class="l"><b>${esc(kName(k))}</b>
+      <div class="muted">${[k.field_5, f.map(x => x[CF.name]).join(", ")].filter(Boolean).map(esc).join(" · ")}</div>
+      <div>${tel ? `<a href="tel:${tel.replace(/\s/g, "")}" onclick="event.stopPropagation()">${esc(tel)}</a>` : ""}${tel && k.field_3 ? " · " : ""}${k.field_3 ? `<a href="mailto:${esc(k.field_3)}" onclick="event.stopPropagation()">${esc(k.field_3)}</a>` : ""}</div></div></div>`; }).join("") || `<div class="empty">Nič sa nenašlo.</div>`}</div>`;
+}
+function renderCrmKedit(){
+  const el = $("screen-crm-kedit"); if (!crmGuard(el, renderCrmKedit)) return;
+  const isNew = C.kedit === "new", k = isNew ? {} : contactById(C.kedit);
+  const inp = (id, l, v, type = "text") => `<label>${l}</label><input type="${type}" id="k-${id}" value="${esc(v || "")}">`;
+  el.innerHTML = `<div class="title"><button class="link" style="padding-left:0" onclick="go(C.kfirm ? 'crm-firma' : 'crm-kontakty')">‹ Späť</button></div>
+    <div class="card"><h3>${isNew ? "Nový kontakt" : "Upraviť kontakt"}</h3>${inp("first", "Meno", k.field_1)}${inp("last", "Priezvisko", k.Title)}
+    ${inp("tel", "Telefón", telOf(k), "tel")}${inp("email", "E-mail", k.field_3, "email")}${inp("email2", "E-mail 2", k.field_4, "email")}
+    ${inp("pos", "Pozícia", k.field_5)}${inp("note", "Poznámka", k.field_6)}
+    <button class="block" onclick="saveContact()">Uložiť</button>
+    ${!isNew && C.kfirm ? `<button class="del" style="padding-left:0;margin-top:12px" onclick="unlinkContact()">Odobrať z firmy ${esc(firmById(C.kfirm)[CF.name])}</button>` : ""}</div>`;
+}
+async function saveContact(){
+  const isNew = C.kedit === "new", v = id => $("k-" + id).value.trim() || null;
+  const fields = { Title:v("last"), field_1:v("first"), Telefon:v("tel"), field_3:v("email"), field_4:v("email2"), field_5:v("pos"), field_6:v("note") };
+  if (!fields.Title && !fields.field_1) return toast("Zadaj meno");
+  if (!fields.Title) { fields.Title = fields.field_1; fields.field_1 = null; }
+  await crmSave(async () => {
+    if (isNew) {
+      const x = await Lists.create(LIST.kontakty, fields); C.kontakty.push(x);
+      if (C.kfirm) { const f = firmById(C.kfirm), ids = [...(f.Contacts || []).map(c => Number(c.LookupId)), Number(x.id)];
+        await Lists.update(LIST.firmy, C.kfirm, { "ContactsLookupId@odata.type":"Collection(Edm.Int32)", ContactsLookupId:ids });
+        f.Contacts = ids.map(i => ({ LookupId:i })); }
+    } else Object.assign(contactById(C.kedit), await Lists.update(LIST.kontakty, C.kedit, fields));
+  }, "Kontakt uložený");
+  go(C.kfirm ? "crm-firma" : "crm-kontakty");
+}
+
+function seedCrm(){
+  const kontakty = [{ id:"1", Title:"Nováková", field_1:"Jana", field_2:902111222, field_3:"jana@alfa.sk", field_5:"Nákup" },
+    { id:"2", Title:"Horváth", field_1:"Peter", field_2:905333444, field_5:"Konateľ" }];
+  const t = todayISO();
+  const firmy = [{ id:"10", Title:"Firma Alfa s.r.o.", field_11:"Deal", Owner:"Novák", field_3:"Key Account", field_4:"Retail", field_8:"Bratislava", field_9:dWrite(addDays(t, -2)), field_10:"Stretnutie v júli, chcú vzorky.", Contacts:[{ LookupId:1 }] },
+    { id:"11", Title:"Bistro Beta", field_11:"Lead", Owner:"Kováč", field_3:"Small Account", field_4:"Bistro", field_8:"Nitra", field_9:dWrite(t), Contacts:[{ LookupId:2 }] },
+    { id:"12", Title:"Gama Retail a.s.", field_11:"No Lead", Owner:"Novák", field_8:"Košice" }];
+  return { [LIST.firmy]:firmy, [LIST.kontakty]:kontakty, [LIST.hist]:[{ id:"100", FirmaId:10, Datum:dWrite(addDays(t, -10)), Typ:"Hovor", Text:"Dohodnuté vzorky.", Autor:"demo" }] };
+}
+
+function renderNastavenia(){
+  const el = $("screen-nastavenia");
+  let h = `<div class="title"><h2>Nastavenia</h2><button class="link" onclick="setMode(isCrm(S.lastCrm||'')&&S.modeBeforeSettings==='crm'?'crm':'sklad')">Späť</button></div>`;
+  h += `<div class="card"><h3>Nápoje</h3><p class="muted" style="margin-top:0">„Názov v exporte“ musí sedieť s názvom v synchronizácii (sync/mapping.json).</p>`;
+  drinks(true).forEach(d => {
+    h += `<div class="entry" style="display:block"><div class="row"><div><label>Názov</label><input type="text" value="${esc(d.name)}" onchange="setDrink('${d.id}','name',this.value)"></div>
+      <div><label>Názov v exporte</label><input type="text" value="${esc(d.key)}" onchange="setDrink('${d.id}','key',this.value)"></div></div>
+      <div class="row" style="align-items:flex-end"><div><label>Skupina</label><input type="text" value="${esc(d.group || "")}" onchange="setDrink('${d.id}','group',this.value)"></div>
+      <div style="display:flex; gap:12px; padding-bottom:10px; font-size:14px;"><label style="margin:0;color:var(--text)"><input type="checkbox" ${d.hidden ? "checked" : ""} onchange="setDrink('${d.id}','hidden',this.checked)"> Skryť</label></div></div></div>`;
+  });
+  h += `<div class="row" style="margin-top:12px"><input type="text" id="nd-name" placeholder="Nový nápoj"><button class="secondary" style="flex:0 0 auto" onclick="addDrink()">Pridať</button></div></div>`;
+  const u = S.sales?.unmapped || {}, un = [...Object.entries(u.shoptet || {}), ...Object.entries(u.shopify || {})].sort((a, b) => b[1] - a[1]);
+  h += `<div class="card"><h3>Synchronizácia predajov</h3>${S.sales ? `<p style="margin-top:0">Posledná: ${new Date(S.sales.updatedAt).toLocaleString("sk-SK")}, údaje od ${fmtD(S.sales.since)}.</p>` : `<p style="margin-top:0">Súbor predaje.json zatiaľ nie je v SharePointe.</p>`}
+    ${un.length ? `<details><summary class="muted">Nesledované položky z exportov (${un.length})</summary><table>${un.map(([k, n]) => `<tr><td>${esc(k)}</td><td>${fmtN(Math.round(n))}</td></tr>`).join("")}</table></details>` : ""}</div>`;
+  h += `<div class="card"><h3>Začiatok evidencie</h3><p class="muted" style="margin-top:0">Appka počíta len pohyby a inventúry od tohto dňa. Staršie záznamy ostávajú uložené.</p>
+    <input type="date" value="${startDate()}" onchange="setStartDate(this.value)"></div>`;
+  h += `<div class="card"><h3>Pôvodná appka</h3><p class="muted" style="margin-top:0">Prepíše nápoje, príjmy a inventúry dátami z pôvodnej appky. Výdaje ostanú.</p>
+    <button class="secondary" onclick="migrateV1()">Načítať znova z pôvodnej appky</button></div>`;
+  h += `<div class="card"><h3>O appke</h3><p class="muted" style="margin:0">${APP_VERSION} · ${DEMO ? "ukážkový režim" : esc(S.user)}</p>
+    ${DEMO ? "" : `<button class="secondary" style="margin-top:10px" onclick="odhlasit()">Odhlásiť sa</button>`}</div>`;
+  el.innerHTML = h;
+}
+async function setDrink(id, k, v){
+  if (typeof v === "string") { v = v.trim(); if (!v && k !== "group") return toast("Nesmie byť prázdne"); }
+  await mutate(() => { drinkById(id)[k] = v; }, "Uložené");
+}
+async function addDrink(){
+  const name = $("nd-name").value.trim(); if (!name) return toast("Zadaj názov");
+  await mutate(() => S.data.drinks.push({ id:uid(), name, key:name, group:G_OTHER }), "Nápoj pridaný");
+}
+async function migrateV1(){
+  if (!S.fresh && !confirm("Prepísať nápoje, príjmy a inventúry dátami z pôvodnej appky?")) return;
+  let v1;
+  try { if (DEMO) throw new Error("V ukážkovom režime nie je pôvodná appka."); v1 = (await Store.load(FILE_V1)).data; if (!v1) throw new Error("Súbor pôvodnej appky sa nenašiel."); }
+  catch(e){ return toast("Chyba: " + e.message); }
+  const invDates = new Set((v1.inventories || []).map(i => i.date));
+  const old = Object.fromEntries(S.data.drinks.map(d => [d.id, d]));
+  await mutate(() => {
+    S.data.drinks = (v1.drinks || []).map(d => old[d.id] ? { ...old[d.id], name:d.name }
+      : { id:d.id, name:d.name, key:d.name, group:LP_NAMES.includes(d.name) ? G_LP : G_OTHER });
+    S.data.receipts = (v1.receipts || []).map(r => ({ id:r.id, batch:r.date + "-v1", date:invDates.has(r.date) ? addDays(r.date, -1) : r.date,
+      drinkId:r.drinkId, qty:r.qty, note:"z pôvodnej appky", by:"migrácia", at:new Date().toISOString() }));
+    S.data.counts = (v1.inventories || []).map(i => ({ id:i.id, date:i.date, counts:i.counts, by:"migrácia", at:new Date().toISOString() }));
+  }, "Dáta načítané");
+}
+
+function seedDemo(){
+  const d = emptyData();
+  d.drinks = [["a","Orange",G_LP,1],["b","Marakuja",G_LP,1],["c","Granat",G_LP,1],["e","Krab 0,5 plech",G_OTHER,0]]
+    .map(x => ({ id:x[0], name:x[1], key:x[1], group:x[2] }));
+  d.counts = [{ id:"i1", date:"2026-09-01", counts:{ a:200, b:268, c:300, e:60 } }, { id:"i2", date:"2026-10-02", counts:{ a:250, b:304, c:130, e:40 } }];
+  const r = (date, drinkId, qty) => d.receipts.push({ id:uid(), batch:date, date, drinkId, qty, note:"" });
+  r("2026-09-11","a",1150); r("2026-09-11","b",1112); r("2026-09-23","c",600); r("2026-09-23","e",100); r("2026-10-05","a",300);
+  d.outs = [{ id:"g1", type:"propagacia", date:"2026-09-14", label:"Bratislava Marathon", items:{ a:48, b:24 } },
+    { id:"g2", type:"odpis", date:"2026-09-20", label:"Rozbité pri vykládke", items:{ c:6 } }];
+  return d;
+}
+function seedDemoSales(){
+  return { updatedAt:new Date().toISOString(), since:"2026-07-01", unmapped:{ shoptet:{ "340 NILIO Great Warrior 330ml":264 }, shopify:{} },
+    shoptet:[{ d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Orange", q:1038 }, { d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Marakuja", q:944 },
+      { d:"2026-09-30", o:"513", c:"GSO", gso:true, k:"Granat", q:686 }, { d:"2026-09-04", o:"490", c:"Firma Alfa s.r.o.", gso:false, k:"Marakuja", q:132 },
+      { d:"2026-09-20", o:"500", c:"Firma Beta a.s.", gso:false, k:"Krab 0,5 plech", q:110 }, { d:"2026-10-04", o:"520", c:"Firma Alfa s.r.o.", gso:false, k:"Orange", q:24 }],
+    shopify:[{ d:"2026-09-10", k:"Orange", t:"B2C", q:300 }, { d:"2026-09-12", k:"Orange", t:"B2B", q:164 }, { d:"2026-09-12", k:"Marakuja", t:"B2C", q:76 },
+      { d:"2026-09-15", k:"Marakuja", t:"B2B", q:234 }, { d:"2026-09-16", k:"Granat", t:"B2C", q:176 }, { d:"2026-10-05", k:"Orange", t:"B2C", q:36 }] };
+}
+
+async function spustit(){
+  $("auth-gate").style.display = "none"; $("app-loading").style.display = "flex";
+  try {
+    S.user = DEMO ? "demo" : (account.username || account.name || ""); S.userName = DEMO ? "demo" : (account.name || account.username || "");
+    if (DEMO && !(await DemoStore.load(FILE_SALES)).data) await DemoStore.save(FILE_SALES, seedDemoSales());
+    await loadAll();
+    $("app-loading").style.display = "none"; $("app-root").style.display = "block";
+    if (DEMO) $("demo-bar").style.display = "block";
+    go("prehlad");
+  } catch(e){
+    console.error(e);
+    $("loading-text").innerHTML = `Chyba pri načítaní (${APP_VERSION}): <span style="color:var(--danger)">${esc(e.message)}</span><br><br>` +
+      (DEMO ? "" : `<button onclick="odhlasit()">Odhlásiť sa a skúsiť znova</button>`);
+  }
+}
+window.addEventListener("load", async () => {
+  if (DEMO) return spustit();
+  await initMsal();
+  if (account) spustit(); else $("auth-gate").style.display = "flex";
+});
+</script>
+</body>
+</html>
