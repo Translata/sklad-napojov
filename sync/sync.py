@@ -299,7 +299,7 @@ def upload(data):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--from", dest="since", default="2026-07-01", help="od dátumu vytvorenia objednávky (YYYY-MM-DD)")
+    ap.add_argument("--from", dest="since", default="2026-03-01", help="od dátumu vytvorenia objednávky (YYYY-MM-DD)")
     ap.add_argument("--out", help="uložiť aj lokálne do súboru")
     ap.add_argument("--no-upload", action="store_true", help="nezapisovať na SharePoint")
     a = ap.parse_args()
