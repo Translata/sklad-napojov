@@ -38,13 +38,14 @@ query($q: String!, $after: String) {
   orders(first: 50, after: $after, query: $q, sortKey: CREATED_AT) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      name createdAt cancelledAt email
+      name createdAt cancelledAt email taxesIncluded
       billingAddress { company name }
       customer { displayName ico: metafield(namespace: "custom", key: "ico") { value } }
       fulfillments { status location { name } }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
-        nodes { id title currentQuantity variant { id } }
+        nodes { id title currentQuantity variant { id } taxLines { rate }
+          discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } } }
       }
     }
   }
@@ -115,6 +116,7 @@ def shoptet_lines(mapping, since):
     gso_ico = os.environ.get("GSO_ICO", "").strip()
 
     agg = defaultdict(float)
+    value = defaultdict(float)
     unmapped = defaultdict(float)
     orders = set()
     for r in rows:
@@ -136,11 +138,15 @@ def shoptet_lines(mapping, since):
         person = (r.get("billFullName") or r.get("billName") or "").strip()
         customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
         o = r["code"]
+        price = float((r.get("orderItemTotalPriceWithoutVat") or "0").replace(",", ".").replace(" ", "") or 0)
+        total_cans = sum(per_unit[code].values())
         for name, n in per_unit[code].items():
             agg[(d, o, customer, ico, dom, gso, name)] += qty * n
+            value[(d, o, customer, ico, dom, gso, name)] += price * n / total_cans
         orders.add(o)
 
-    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "gso": g, "k": k, "q": round(q)}
+    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "gso": g, "k": k, "q": round(q),
+              "v": round(value[(d, o, c, i, e, g, k)], 2)}
              for (d, o, c, i, e, g, k), q in sorted(agg.items()) if round(q)]
     return lines, dict(unmapped), len(orders)
 
@@ -176,6 +182,7 @@ def shopify_lines(mapping, since):
     agg = defaultdict(int)
     unmapped = defaultdict(int)
     per_order = defaultdict(int)
+    per_value = defaultdict(float)
     n_orders = 0
     after = None
     while True:
@@ -213,15 +220,22 @@ def shopify_lines(mapping, since):
                     unmapped[li["title"][:60]] += qty
                     continue
                 cans, kind = variants[vid]
+                unit = float(li["discountedUnitPriceAfterAllDiscountsSet"]["shopMoney"]["amount"])
+                if o.get("taxesIncluded"):
+                    unit /= 1 + sum(float(t["rate"] or 0) for t in li["taxLines"])
+                total_cans = sum(cans.values())
                 for name, n in cans.items():
                     agg[(day, name, kind, loc)] += n * qty
-                    per_order[(o["name"], day, company, ico, dom, kind, name, loc)] += n * qty
+                    key = (o["name"], day, company, ico, dom, kind, name, loc)
+                    per_order[key] += n * qty
+                    per_value[key] += unit * qty * n / total_cans
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "loc": l, "q": q} for (d, k, t, l), q in sorted(agg.items()) if q]
-    orders = [{"o": o, "d": d, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "t": t, "k": k, "loc": l, "q": q}
+    orders = [{"o": o, "d": d, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "t": t, "k": k, "loc": l, "q": q,
+               "v": round(per_value[(o, d, c, i, e, t, k, l)], 2)}
               for (o, d, c, i, e, t, k, l), q in sorted(per_order.items()) if q]
     return lines, dict(unmapped), n_orders, orders
 

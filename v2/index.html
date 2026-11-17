@@ -141,6 +141,21 @@
   select.locsel.gso{background-color:#fff7ed; color:#c2410c; border-color:#fed7aa;}
   .mv-det{padding:0 0 12px; border-bottom:1px solid var(--line);}
   header .mode{margin:0; width:180px;}
+  .tblwrap{overflow:auto; max-height:calc(100vh - 210px); border:1px solid var(--border); border-radius:12px; background:var(--card);}
+  table.grid{border-collapse:separate; border-spacing:0; font-size:13px; min-width:100%;}
+  table.grid th, table.grid td{padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; text-align:right; font-variant-numeric:tabular-nums;}
+  table.grid th{position:sticky; top:0; background:var(--card); z-index:2; font-size:11px; color:var(--muted); font-weight:600; vertical-align:bottom;}
+  table.grid tr.flt th{top:30px; padding:4px; border-bottom:1px solid var(--border);}
+  table.grid tr.flt input, table.grid tr.flt select{font-size:12px; padding:4px 6px; min-width:54px; width:100%; border-radius:6px;}
+  table.grid tr.flt select{padding-right:20px; background-position:right 4px center;}
+  table.grid th:first-child, table.grid td:first-child{position:sticky; left:0; background:var(--card); text-align:left; z-index:1; max-width:220px; overflow:hidden; text-overflow:ellipsis;}
+  table.grid th:first-child{z-index:3;}
+  table.grid .tx{text-align:left;}
+  table.grid th.srt{cursor:pointer; user-select:none;} table.grid th.srt.on{color:var(--text);}
+  table.grid tbody tr{cursor:pointer;} table.grid tbody tr:hover td{background:var(--bg);}
+  table.grid tfoot td{font-weight:700; position:sticky; bottom:0; background:var(--card); border-top:1px solid var(--border);}
+  table.grid td.z{color:var(--faint);}
+  .promo-grid{display:grid; grid-template-columns:1fr 1fr; gap:0 12px;}
   .chip{display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;}
   .chip.ok{background:var(--ok-soft); color:var(--ok);} .chip.neu{background:#eceef2; color:var(--muted);}
   .chip.warn{background:var(--warn-soft); color:var(--warn);} .chip.ppp{background:#eef2ff; color:#1d4ed8;} .chip.sql{background:#f3e8ff; color:#7e22ce;}
@@ -179,6 +194,7 @@
   <section id="screen-crm-firma" class="screen"></section>
   <section id="screen-crm-edit" class="screen"></section>
   <section id="screen-crm-kontakty" class="screen"></section>
+  <section id="screen-crm-tabulka" class="screen"></section>
   <section id="screen-crm-kedit" class="screen"></section>
 </main>
 <nav class="tabs" id="nav-sklad">
@@ -190,13 +206,14 @@
   <button data-s="crm-dnes" onclick="go('crm-dnes')"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Na dnes</button>
   <button data-s="crm-firmy" onclick="go('crm-firmy')"><svg viewBox="0 0 24 24"><path d="M4 20V6l7-3v17M11 9h9v11M7 8v.5M7 12v.5M7 16v.5M15 13v.5M15 16.5v.5"/><path d="M3 20h18"/></svg>Firmy</button>
   <button data-s="crm-kontakty" onclick="go('crm-kontakty')"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg>Kontakty</button>
+  <button data-s="crm-tabulka" onclick="go('crm-tabulka')"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 10h17M3.5 14.5h17M9.5 5v14"/></svg>Prehľad</button>
 </nav>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
 
-const APP_VERSION = "v8.6";
+const APP_VERSION = "v8.7";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -404,9 +421,9 @@ const NAV_OF = { "crm-firma":"crm-firmy", "crm-edit":"crm-firmy", "crm-kedit":"c
 function setMode(m){ go(m === "crm" ? (S.lastCrm || "crm-dnes") : (S.lastSklad || "prehlad")); }
 function go(s){
   if (s !== "nastavenia") { if (isCrm(s)) S.lastCrm = NAV_OF[s] || s; else S.lastSklad = s; }
-  if (s === "crm-firmy" || s === "crm-dnes") C.back = s;
+  if (s === "crm-firmy" || s === "crm-dnes" || s === "crm-tabulka") C.back = s;
   S.screen = s;
-  document.querySelector("main").classList.remove("wide");
+  document.querySelector("main").classList.toggle("wide", s === "crm-tabulka");
   const crm = isCrm(s);
   $("nav-sklad").style.display = crm ? "none" : "flex"; $("nav-crm").style.display = crm ? "flex" : "none";
   document.querySelectorAll("#mode-sw button").forEach(b => b.classList.toggle("on", b.dataset.m === (crm ? "crm" : "sklad")));
@@ -418,7 +435,7 @@ function renderAll(){
   if (!S.data) return;
   $("hdr-right").style.display = "flex"; $("mode-sw").style.display = "flex"; $("hdr-title").style.display = "none";
   ({ prehlad:renderPrehlad, zadat:renderZadat, pohyby:renderPohyby, nastavenia:renderNastavenia, "crm-dnes":renderCrmDnes, "crm-firmy":renderCrmFirmy,
-     "crm-firma":renderCrmFirma, "crm-edit":renderCrmEdit, "crm-kontakty":renderCrmKontakty, "crm-kedit":renderCrmKedit }[S.screen])();
+     "crm-firma":renderCrmFirma, "crm-edit":renderCrmEdit, "crm-kontakty":renderCrmKontakty, "crm-kedit":renderCrmKedit, "crm-tabulka":renderCrmTabulka }[S.screen])();
 }
 const ln = (label, v, cls = "") => `<div class="ln ${cls}"><span>${label}</span><span class="v">${v}</span></div>`;
 function syncInfo(){
@@ -669,6 +686,8 @@ const LIST = { firmy:"Companies", kontakty:"Contacts", hist:"CRM historia" };
 const CF = { name:"Title", lastContact:"field_0", distributor:"field_2", weight:"field_3", area:"field_4", source:"field_5", pricelist:"field_6",
   address:"field_7", city:"field_8", next:"field_9", notes:"field_10", status:"field_11", owner:"Owner", tag:"Tag", ico:"ICO" };
 const STATUS = ["Lead","SQL","Deal","No Lead","On Hold"];
+const PROMO = [["PromoChladMala","Chladnička malá"],["PromoChladVelka","Chladnička veľká"],["PromoFlag","Flag"],["PromoLehatko","Lehátko"],
+  ["PromoPlagaty","Plagáty"],["PromoLetaky","Letáky na stôl"],["PromoReels","Platené reelsko"],["PromoDegustacia","Degustácia"]];
 const STATUS_CLS = { "Lead":"ppp", "SQL":"sql", "Deal":"ok", "No Lead":"neu", "On Hold":"warn" };
 const HIST_TYPES = ["Hovor","Stretnutie","E-mail","Iné"];
 const C = { choices:{}, loaded:false, loading:null, firmy:[], kontakty:[], hist:[], noHist:false, q:"", status:"", owner:"", kq:"", open:null, edit:null, kedit:null, kfirm:null };
@@ -831,10 +850,16 @@ function firmSales(f){
   const ico = (f[CF.ico] || "").replace(/\s/g, ""), dom = firmDomains(f), o = {};
   const s = S.sales || {}, hit = l => (ico && l.i === ico) || (l.e && dom.has(l.e));
   (s.shoptet || []).filter(l => !l.gso && hit(l)).forEach(l => {
-    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0, v:0 }; x.q += l.q; if (l.v == null) x.nov = true; else x.v += l.v; });
   (s.shopifyOrders || []).filter(hit).forEach(l => {
-    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0 }; x.q += l.q; });
+    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0, v:0 }; x.q += l.q; if (l.v == null) x.nov = true; else x.v += l.v; });
   return Object.values(o).sort((a, b) => b.d.localeCompare(a.d));
+}
+
+const fmtE = n => n.toLocaleString("sk-SK", { minimumFractionDigits:0, maximumFractionDigits:0 }) + " €";
+function firmStats(f){
+  const s = firmSales(f);
+  return { n:s.length, q:s.reduce((a, x) => a + x.q, 0), obrat:s.reduce((a, x) => a + x.v, 0), partial:s.some(x => x.nov), last:s[0] ? s[0].d : "" };
 }
 
 function renderCrmFirma(){
@@ -853,8 +878,10 @@ function renderCrmFirma(){
     <div style="display:flex;gap:8px;margin-top:10px"><button class="small secondary" onclick="C.kedit='new';C.kfirm='${f.id}';go('crm-kedit')">+ Nový kontakt</button>
     <button class="small secondary" onclick="C.pick=C.pick==null?'':null;renderCrmFirma()">+ Existujúci kontakt</button></div>
     ${C.pick != null ? contactPicker(f) : ""}</div>`;
-  const total = sales.reduce((s, x) => s + x.q, 0);
-  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Posledná objednávka", fmtD(sales[0].d))}
+  const total = sales.reduce((s, x) => s + x.q, 0), promo = PROMO.filter(([k]) => +f[k] > 0);
+  h += `<div class="card"><h3>Promo materiál</h3>${promo.length ? promo.map(([k, l]) => ln(l, fmtN(+f[k]) + " ks")).join("") : `<div class="muted">Nič zapožičané.</div>`}</div>`;
+  const obrat = sales.reduce((s, x) => s + x.v, 0), partial = sales.some(x => x.nov);
+  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Obrat bez DPH", (partial ? "aspoň " : "") + fmtE(obrat))}${ln("Posledná objednávka", fmtD(sales[0].d))}
     <table class="t" style="margin-top:8px">${sales.slice(0, 6).map(x => `<tr><td>${fmtDs(x.d)} <span class="muted">${x.src} ${esc(x.o)}</span></td><td>${fmtN(x.q)}</td></tr>`).join("")}</table>`
     : `<div class="muted">${f[CF.ico] || firmDomains(f).size ? "Žiadne objednávky." : "Žiadne objednávky. Objednávky sa párujú podľa IČO a podľa firemnej e-mailovej domény kontaktov, doplň aspoň jedno."}</div>`}</div>`;
   h += `<div class="card"><h3>História</h3>${C.noHist ? `<div class="note">Zoznam „CRM historia“ v SharePointe ešte neexistuje.</div>` : `
@@ -914,11 +941,14 @@ function renderCrmEdit(){
     ${sel("weight", "Váha klienta", optionsOf(CF.weight))}${sel("area", "Oblasť pôsobenia", optionsOf(CF.area))}${sel("pricelist", "Cenník", optionsOf(CF.pricelist))}
     ${sel("source", "Zdroj", optionsOf(CF.source))}${inp("distributor", "Distribútor")}
     ${inp("address", "Adresa")}${inp("city", "Mesto")}
+    <h3 style="margin-top:18px">Promo materiál (ks)</h3><div class="promo-grid">${PROMO.map(([k, l]) =>
+      `<div><label>${l}</label><input type="number" min="0" inputmode="numeric" id="e-${k}" value="${f[k] == null ? "" : +f[k]}"></div>`).join("")}</div>
     <button class="block" onclick="saveFirm()">Uložiť</button></div>`;
 }
 async function saveFirm(){
   const isNew = C.edit === "new", keys = ["name","ico","status","owner","next","weight","area","pricelist","source","distributor","address","city"], fields = {};
   keys.forEach(k => { const v = $("e-" + k).value.trim(); fields[CF[k]] = k === "next" ? dWrite(v) : (v || null); });
+  PROMO.forEach(([k]) => { const v = $("e-" + k).value.trim(); fields[k] = v === "" ? null : Math.max(0, Math.round(+v)) || 0; });
   if (!fields[CF.name]) return toast("Zadaj názov");
   await crmSave(async () => {
     if (isNew) { const x = await Lists.create(LIST.firmy, fields); C.firmy.push(x); C.open = x.id; }
@@ -926,6 +956,70 @@ async function saveFirm(){
     S.screen = "crm-firma";
   }, "Uložené");
   go("crm-firma");
+}
+
+const T_COLS = [
+  { k:"name", l:"Firma", t:"text", get:f => f[CF.name] || "" },
+  { k:"city", l:"Mesto", t:"text", get:f => f[CF.city] || "" },
+  { k:"owner", l:"Vlastník", t:"sel", get:f => f[CF.owner] || "" },
+  { k:"status", l:"Stav", t:"sel", get:f => f[CF.status] || "" },
+  { k:"n", l:"Objednávky", t:"num", get:(f, st) => st.n },
+  { k:"q", l:"Plechovky", t:"num", get:(f, st) => st.q },
+  { k:"obrat", l:"Obrat €", t:"num", get:(f, st) => Math.round(st.obrat) },
+  { k:"last", l:"Posledná obj.", t:"date", get:(f, st) => st.last },
+  ...PROMO.map(([k, l]) => ({ k, l, t:"num", get:f => +f[k] || 0 }))
+];
+function tMatch(c, v, q){
+  q = q.trim(); if (!q) return true;
+  if (c.t === "text") return norm(v).includes(norm(q));
+  if (c.t === "sel") return q === "—" ? !v : v === q;
+  const m = q.replace(/\s/g, "").match(/^(>=|<=|>|<|=)?(.+)$/), op = m[1] || "=";
+  let a = v, b = m[2];
+  if (c.t === "date") {
+    const d = b.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/) || b.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!d) return fmtD(v || "0000-00-00").includes(q);
+    b = d[1].length === 4 ? `${d[1]}-${d[2]}-${d[3]}` : `${d[3]}-${d[2].padStart(2, "0")}-${d[1].padStart(2, "0")}`;
+    if (!a) return false;
+  } else { b = +b.replace(",", "."); if (isNaN(b)) return true; }
+  return op === ">" ? a > b : op === "<" ? a < b : op === ">=" ? a >= b : op === "<=" ? a <= b : a === b;
+}
+function tRows(){
+  const st = C.tSort || { k:"obrat", dir:-1 }, col = T_COLS.find(c => c.k === st.k), F = C.tF || {};
+  const rows = C.firmy.map(f => { const s = firmStats(f); return { f, s, v:Object.fromEntries(T_COLS.map(c => [c.k, c.get(f, s)])) }; })
+    .filter(r => T_COLS.every(c => tMatch(c, r.v[c.k], F[c.k] || "")));
+  return rows.sort((a, b) => { const x = a.v[col.k], y = b.v[col.k];
+    return (typeof x === "number" ? x - y : String(x).localeCompare(String(y), "sk")) * st.dir || a.v.name.localeCompare(b.v.name, "sk"); });
+}
+function tBody(){
+  const rows = tRows(), cell = (c, r) => {
+    const v = r.v[c.k];
+    if (c.t === "num") return `<td class="${v ? "" : "z"}">${c.k === "obrat" && v ? (r.s.partial ? "≥ " : "") + fmtN(v) : fmtN(v)}</td>`;
+    if (c.t === "date") return `<td>${v ? fmtD(v) : ""}</td>`;
+    return `<td class="tx">${esc(v)}</td>`;
+  };
+  $("t-body").innerHTML = rows.map(r => `<tr onclick="openFirm('${r.f.id}')">${T_COLS.map(c => cell(c, r)).join("")}</tr>`).join("")
+    || `<tr><td class="tx muted" colspan="${T_COLS.length}">Žiadna firma nezodpovedá filtru.</td></tr>`;
+  $("t-foot").innerHTML = `<tr>${T_COLS.map((c, i) => i === 0 ? `<td class="tx">${rows.length} firiem</td>`
+    : c.t === "num" ? `<td>${fmtN(rows.reduce((a, r) => a + r.v[c.k], 0))}</td>` : "<td></td>").join("")}</tr>`;
+}
+function tFilter(k, v){ (C.tF = C.tF || {})[k] = v; tBody(); }
+function tSort(k){ const st = C.tSort || { k:"obrat", dir:-1 }, c = T_COLS.find(x => x.k === k);
+  C.tSort = st.k === k ? { k, dir:-st.dir } : { k, dir:c.t === "num" || c.t === "date" ? -1 : 1 }; renderCrmTabulka(); }
+function renderCrmTabulka(){
+  const el = $("screen-crm-tabulka"); if (!crmGuard(el, renderCrmTabulka)) return;
+  const st = C.tSort || { k:"obrat", dir:-1 }, F = C.tF || {};
+  const flt = c => c.t === "sel"
+    ? `<select onchange="tFilter('${c.k}',this.value)"><option value="">Všetko</option>${[...optionsOf(c.k === "owner" ? CF.owner : CF.status), "—"].map(o =>
+        `<option ${F[c.k] === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+    : `<input type="text" value="${esc(F[c.k] || "")}" placeholder="${c.t === "num" ? ">0" : c.t === "date" ? ">1.10.2026" : "hľadať"}" oninput="tFilter('${c.k}',this.value)">`;
+  el.innerHTML = `<div class="title"><h2>Prehľad klientov</h2><button class="link" onclick="C.tF={};renderCrmTabulka()">Zrušiť filtre</button></div>
+    <div class="tblwrap"><table class="grid"><thead>
+      <tr>${T_COLS.map(c => `<th class="srt ${c.t === "num" || c.t === "date" ? "" : "tx"} ${st.k === c.k ? "on" : ""}" onclick="tSort('${c.k}')">${c.l}${st.k === c.k ? (st.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>
+      <tr class="flt">${T_COLS.map(c => `<th>${flt(c)}</th>`).join("")}</tr></thead>
+      <tbody id="t-body"></tbody><tfoot id="t-foot"></tfoot></table></div>
+    <p class="muted" style="margin:8px 4px">Klikni na hlavičku stĺpca pre zoradenie. Pri číslach a dátume môžeš filtrovať napr. <b>&gt;0</b>, <b>&lt;=5</b>, <b>=0</b> alebo <b>&gt;1.10.2026</b>.
+      Obrat je za nápoje bez DPH a zálohy. Pri Shopify objednávkach starších ako 60 dní obrat chýba, tam je pred sumou znak ≥.</p>`;
+  tBody();
 }
 
 function renderCrmKontakty(){
@@ -970,7 +1064,7 @@ function seedCrm(){
   const kontakty = [{ id:"1", Title:"Nováková", field_1:"Jana", field_2:902111222, field_3:"jana@alfa.sk", field_5:"Nákup" },
     { id:"2", Title:"Horváth", field_1:"Peter", field_2:905333444, field_5:"Konateľ" }];
   const t = todayISO();
-  const firmy = [{ id:"10", Title:"Firma Alfa s.r.o.", field_11:"Deal", Owner:"Novák", field_3:"Key Account", field_4:"Retail", field_8:"Bratislava", field_9:dWrite(addDays(t, -2)), field_10:"Stretnutie v júli, chcú vzorky.", Contacts:[{ LookupId:1 }] },
+  const firmy = [{ id:"10", Title:"Firma Alfa s.r.o.", field_11:"Deal", Owner:"Novák", PromoChladMala:1, PromoFlag:2, PromoPlagaty:5, field_3:"Key Account", field_4:"Retail", field_8:"Bratislava", field_9:dWrite(addDays(t, -2)), field_10:"Stretnutie v júli, chcú vzorky.", Contacts:[{ LookupId:1 }] },
     { id:"11", Title:"Bistro Beta", field_11:"Lead", Owner:"Kováč", field_3:"Small Account", field_4:"Bistro", field_8:"Nitra", field_9:dWrite(t), Contacts:[{ LookupId:2 }] },
     { id:"12", Title:"Gama Retail a.s.", field_11:"No Lead", Owner:"Novák", field_8:"Košice" }];
   return { [LIST.firmy]:firmy, [LIST.kontakty]:kontakty, [LIST.hist]:[{ id:"100", FirmaId:10, Datum:dWrite(addDays(t, -10)), Typ:"Hovor", Text:"Dohodnuté vzorky.", Autor:"demo" }] };
