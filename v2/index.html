@@ -213,7 +213,7 @@
 
 <script>
 
-const APP_VERSION = "v8.7";
+const APP_VERSION = "v8.8";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -850,16 +850,16 @@ function firmSales(f){
   const ico = (f[CF.ico] || "").replace(/\s/g, ""), dom = firmDomains(f), o = {};
   const s = S.sales || {}, hit = l => (ico && l.i === ico) || (l.e && dom.has(l.e));
   (s.shoptet || []).filter(l => !l.gso && hit(l)).forEach(l => {
-    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0, v:0 }; x.q += l.q; if (l.v == null) x.nov = true; else x.v += l.v; });
+    const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0, v:0, vg:0 }; x.q += l.q; if (l.vg == null) x.nov = true; else { x.v += l.v; x.vg += l.vg; } });
   (s.shopifyOrders || []).filter(hit).forEach(l => {
-    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0, v:0 }; x.q += l.q; if (l.v == null) x.nov = true; else x.v += l.v; });
+    const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0, v:0, vg:0 }; x.q += l.q; if (l.vg == null) x.nov = true; else { x.v += l.v; x.vg += l.vg; } });
   return Object.values(o).sort((a, b) => b.d.localeCompare(a.d));
 }
 
 const fmtE = n => n.toLocaleString("sk-SK", { minimumFractionDigits:0, maximumFractionDigits:0 }) + " €";
 function firmStats(f){
   const s = firmSales(f);
-  return { n:s.length, q:s.reduce((a, x) => a + x.q, 0), obrat:s.reduce((a, x) => a + x.v, 0), partial:s.some(x => x.nov), last:s[0] ? s[0].d : "" };
+  return { n:s.length, q:s.reduce((a, x) => a + x.q, 0), obrat:s.reduce((a, x) => a + x.v, 0), obratVat:s.reduce((a, x) => a + x.vg, 0), partial:s.some(x => x.nov), last:s[0] ? s[0].d : "" };
 }
 
 function renderCrmFirma(){
@@ -880,8 +880,8 @@ function renderCrmFirma(){
     ${C.pick != null ? contactPicker(f) : ""}</div>`;
   const total = sales.reduce((s, x) => s + x.q, 0), promo = PROMO.filter(([k]) => +f[k] > 0);
   h += `<div class="card"><h3>Promo materiál</h3>${promo.length ? promo.map(([k, l]) => ln(l, fmtN(+f[k]) + " ks")).join("") : `<div class="muted">Nič zapožičané.</div>`}</div>`;
-  const obrat = sales.reduce((s, x) => s + x.v, 0), partial = sales.some(x => x.nov);
-  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Obrat bez DPH", (partial ? "aspoň " : "") + fmtE(obrat))}${ln("Posledná objednávka", fmtD(sales[0].d))}
+  const obrat = sales.reduce((s, x) => s + x.v, 0), obratVat = sales.reduce((s, x) => s + x.vg, 0), partial = sales.some(x => x.nov);
+  h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Obrat bez DPH", (partial ? "aspoň " : "") + fmtE(obrat))}${ln("Obrat s DPH", (partial ? "aspoň " : "") + fmtE(obratVat))}${ln("Posledná objednávka", fmtD(sales[0].d))}
     <table class="t" style="margin-top:8px">${sales.slice(0, 6).map(x => `<tr><td>${fmtDs(x.d)} <span class="muted">${x.src} ${esc(x.o)}</span></td><td>${fmtN(x.q)}</td></tr>`).join("")}</table>`
     : `<div class="muted">${f[CF.ico] || firmDomains(f).size ? "Žiadne objednávky." : "Žiadne objednávky. Objednávky sa párujú podľa IČO a podľa firemnej e-mailovej domény kontaktov, doplň aspoň jedno."}</div>`}</div>`;
   h += `<div class="card"><h3>História</h3>${C.noHist ? `<div class="note">Zoznam „CRM historia“ v SharePointe ešte neexistuje.</div>` : `
@@ -965,7 +965,8 @@ const T_COLS = [
   { k:"status", l:"Stav", t:"sel", get:f => f[CF.status] || "" },
   { k:"n", l:"Objednávky", t:"num", get:(f, st) => st.n },
   { k:"q", l:"Plechovky", t:"num", get:(f, st) => st.q },
-  { k:"obrat", l:"Obrat €", t:"num", get:(f, st) => Math.round(st.obrat) },
+  { k:"obrat", l:"Bez DPH €", t:"num", get:(f, st) => Math.round(st.obrat) },
+  { k:"obratVat", l:"S DPH €", t:"num", get:(f, st) => Math.round(st.obratVat) },
   { k:"last", l:"Posledná obj.", t:"date", get:(f, st) => st.last },
   ...PROMO.map(([k, l]) => ({ k, l, t:"num", get:f => +f[k] || 0 }))
 ];
@@ -993,7 +994,7 @@ function tRows(){
 function tBody(){
   const rows = tRows(), cell = (c, r) => {
     const v = r.v[c.k];
-    if (c.t === "num") return `<td class="${v ? "" : "z"}">${c.k === "obrat" && v ? (r.s.partial ? "≥ " : "") + fmtN(v) : fmtN(v)}</td>`;
+    if (c.t === "num") return `<td class="${v ? "" : "z"}">${(c.k === "obrat" || c.k === "obratVat") && v ? (r.s.partial ? "≥ " : "") + fmtN(v) : fmtN(v)}</td>`;
     if (c.t === "date") return `<td>${v ? fmtD(v) : ""}</td>`;
     return `<td class="tx">${esc(v)}</td>`;
   };
@@ -1018,7 +1019,7 @@ function renderCrmTabulka(){
       <tr class="flt">${T_COLS.map(c => `<th>${flt(c)}</th>`).join("")}</tr></thead>
       <tbody id="t-body"></tbody><tfoot id="t-foot"></tfoot></table></div>
     <p class="muted" style="margin:8px 4px">Klikni na hlavičku stĺpca pre zoradenie. Pri číslach a dátume môžeš filtrovať napr. <b>&gt;0</b>, <b>&lt;=5</b>, <b>=0</b> alebo <b>&gt;1.10.2026</b>.
-      Obrat je za nápoje bez DPH a zálohy. Pri Shopify objednávkach starších ako 60 dní obrat chýba, tam je pred sumou znak ≥.</p>`;
+      Obrat je len za nápoje, bez poštovného a záloh. Pri Shopify objednávkach starších ako 60 dní obrat chýba, tam je pred sumou znak ≥.</p>`;
   tBody();
 }
 
