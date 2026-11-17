@@ -743,7 +743,6 @@ function telOf(k){
 }
 const optionsOf = field => [...new Set([...(C.choices[field] || []), ...C.firmy.map(f => f[field]).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "sk"));
 const statusChip = s => s ? `<span class="chip ${STATUS_CLS[s] || "neu"}">${esc(s)}</span>` : "";
-const coNorm = s => norm(s).replace(/[.,]/g, "").replace(/(spolsro|sro|as|vos|ks)$/, "");
 function nextBadge(f){
   const n = dLocal(f[CF.next]); if (!n) return "";
   const t = todayISO(), cls = n < t ? "bad" : n === t ? "warn" : "";
@@ -823,12 +822,17 @@ async function dropFirm(ev, value){
   await crmSave(async () => { Object.assign(f, await Lists.update(LIST.firmy, id, { [field]:value || null })); }, `${f[CF.name]}: ${value || "bez hodnoty"}`);
 }
 
+const FREE_MAIL = new Set(["gmail.com","googlemail.com","azet.sk","centrum.sk","zoznam.sk","post.sk","pobox.sk","atlas.sk","stonline.sk","orangemail.sk","chello.sk",
+  "seznam.cz","email.cz","centrum.cz","post.cz","volny.cz","yahoo.com","outlook.com","outlook.sk","hotmail.com","live.com","msn.com","icloud.com","me.com",
+  "gmx.com","gmx.de","gmx.net","proton.me","protonmail.com","aol.com","liquidpositive.com","piestanskypivovar.sk","translata.sk"]);
+const mailDomain = m => { const d = String(m || "").trim().toLowerCase().split("@")[1] || ""; return d.includes(".") && !FREE_MAIL.has(d) ? d : ""; };
+const firmDomains = f => new Set(contactsOf(f).flatMap(k => [k.field_3, k.field_4].map(mailDomain)).filter(Boolean));
 function firmSales(f){
-  const ico = (f[CF.ico] || "").replace(/\s/g, ""), n = coNorm(f[CF.name]), o = {};
-  const s = S.sales || {};
-  (s.shoptet || []).filter(l => !l.gso && ((ico && l.i === ico) || coNorm(l.c) === n)).forEach(l => {
+  const ico = (f[CF.ico] || "").replace(/\s/g, ""), dom = firmDomains(f), o = {};
+  const s = S.sales || {}, hit = l => (ico && l.i === ico) || (l.e && dom.has(l.e));
+  (s.shoptet || []).filter(l => !l.gso && hit(l)).forEach(l => {
     const x = o["s" + l.o] = o["s" + l.o] || { src:"Shoptet", o:l.o, d:l.d, q:0 }; x.q += l.q; });
-  (s.shopifyOrders || []).filter(l => coNorm(l.c) === n).forEach(l => {
+  (s.shopifyOrders || []).filter(hit).forEach(l => {
     const x = o["f" + l.o] = o["f" + l.o] || { src:"Shopify", o:l.o, d:l.d, q:0 }; x.q += l.q; });
   return Object.values(o).sort((a, b) => b.d.localeCompare(a.d));
 }
@@ -852,7 +856,7 @@ function renderCrmFirma(){
   const total = sales.reduce((s, x) => s + x.q, 0);
   h += `<div class="card"><h3>Predaje plechoviek</h3>${sales.length ? `${ln("Spolu od júla", fmtN(total) + " ks")}${ln("Posledná objednávka", fmtD(sales[0].d))}
     <table class="t" style="margin-top:8px">${sales.slice(0, 6).map(x => `<tr><td>${fmtDs(x.d)} <span class="muted">${x.src} ${esc(x.o)}</span></td><td>${fmtN(x.q)}</td></tr>`).join("")}</table>`
-    : `<div class="muted">${f[CF.ico] ? "Žiadne objednávky." : "Žiadne objednávky. Doplň IČO, aby sa objednávky zo Shoptetu spárovali spoľahlivo."}</div>`}</div>`;
+    : `<div class="muted">${f[CF.ico] || firmDomains(f).size ? "Žiadne objednávky." : "Žiadne objednávky. Objednávky sa párujú podľa IČO a podľa firemnej e-mailovej domény kontaktov, doplň aspoň jedno."}</div>`}</div>`;
   h += `<div class="card"><h3>História</h3>${C.noHist ? `<div class="note">Zoznam „CRM historia“ v SharePointe ešte neexistuje.</div>` : `
     <div class="row"><select id="h-typ">${HIST_TYPES.map(t => `<option>${t}</option>`).join("")}</select><input type="date" id="h-next" value="${dLocal(f[CF.next])}" title="Ďalší kontakt"></div>
     <textarea id="h-text" placeholder="Čo sa dohodlo" style="width:100%;margin-top:8px;min-height:70px;padding:10px 12px;font:inherit;font-size:16px;border:1px solid var(--border);border-radius:10px"></textarea>

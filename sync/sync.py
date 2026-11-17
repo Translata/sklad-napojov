@@ -21,6 +21,16 @@ SITE_HOST, SITE_PATH = "translata.sharepoint.com", "/sites/liquidpositive"
 TARGET = "Sklad-app/predaje.json"
 GSO_NAME = re.compile(r"good\s*stuff\s*only", re.I)
 B2C_PRIVATE = "E-shop (súkromné osoby)"
+FREE_MAIL = {"gmail.com", "googlemail.com", "azet.sk", "centrum.sk", "zoznam.sk", "post.sk", "pobox.sk", "atlas.sk",
+             "stonline.sk", "orangemail.sk", "chello.sk", "seznam.cz", "email.cz", "centrum.cz", "post.cz", "volny.cz",
+             "yahoo.com", "outlook.com", "outlook.sk", "hotmail.com", "live.com", "msn.com", "icloud.com", "me.com",
+             "gmx.com", "gmx.de", "gmx.net", "proton.me", "protonmail.com", "aol.com",
+             "liquidpositive.com", "piestanskypivovar.sk", "translata.sk"}
+
+
+def mail_domain(email):
+    d = (email or "").strip().lower().rpartition("@")[2]
+    return "" if not d or d in FREE_MAIL or "." not in d else d
 PRIVATE = "Súkromná osoba"
 
 SHOPIFY_QUERY = """
@@ -28,7 +38,7 @@ query($q: String!, $after: String) {
   orders(first: 50, after: $after, query: $q, sortKey: CREATED_AT) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      name createdAt cancelledAt
+      name createdAt cancelledAt email
       billingAddress { company name }
       customer { displayName }
       fulfillments { status location { name } }
@@ -120,17 +130,18 @@ def shoptet_lines(mapping, since):
                 unmapped[f'{code} {(r.get("orderItemName") or "")[:50]}'] += qty
             continue
         ico = (r.get("billCompanyId") or r.get("customerIdentificationNumber") or "").strip()
+        dom = mail_domain(r.get("email") or r.get("billEmail"))
         company = (r.get("billCompany") or "").strip()
         gso = bool(GSO_NAME.search(company)) or (gso_ico and ico == gso_ico)
         person = (r.get("billFullName") or r.get("billName") or "").strip()
         customer = "GSO" if gso else (company or (f"IČO {ico}" if ico else "") or person or B2C_PRIVATE)
         o = r["code"]
         for name, n in per_unit[code].items():
-            agg[(d, o, customer, ico, gso, name)] += qty * n
+            agg[(d, o, customer, ico, dom, gso, name)] += qty * n
         orders.add(o)
 
-    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), "gso": g, "k": k, "q": round(q)}
-             for (d, o, c, i, g, k), q in sorted(agg.items()) if round(q)]
+    lines = [{"d": d, "o": o, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "gso": g, "k": k, "q": round(q)}
+             for (d, o, c, i, e, g, k), q in sorted(agg.items()) if round(q)]
     return lines, dict(unmapped), len(orders)
 
 
@@ -191,6 +202,7 @@ def shopify_lines(mapping, since):
             bill = o.get("billingAddress") or {}
             company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
                 or (bill.get("name") or "").strip() or PRIVATE
+            dom = mail_domain(o.get("email"))
             for li in o["lineItems"]["nodes"]:
                 qty = li["currentQuantity"]
                 vid = (li["variant"] or {}).get("id")
@@ -202,13 +214,14 @@ def shopify_lines(mapping, since):
                 cans, kind = variants[vid]
                 for name, n in cans.items():
                     agg[(day, name, kind, loc)] += n * qty
-                    per_order[(o["name"], day, company, kind, name, loc)] += n * qty
+                    per_order[(o["name"], day, company, dom, kind, name, loc)] += n * qty
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "loc": l, "q": q} for (d, k, t, l), q in sorted(agg.items()) if q]
-    orders = [{"o": o, "d": d, "c": c, "t": t, "k": k, "loc": l, "q": q} for (o, d, c, t, k, l), q in sorted(per_order.items()) if q]
+    orders = [{"o": o, "d": d, "c": c, **({"e": e} if e else {}), "t": t, "k": k, "loc": l, "q": q}
+              for (o, d, c, e, t, k, l), q in sorted(per_order.items()) if q]
     return lines, dict(unmapped), n_orders, orders
 
 
