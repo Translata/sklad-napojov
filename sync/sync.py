@@ -40,7 +40,7 @@ query($q: String!, $after: String) {
     nodes {
       name createdAt cancelledAt email
       billingAddress { company name }
-      customer { displayName }
+      customer { displayName ico: metafield(namespace: "custom", key: "ico") { value } }
       fulfillments { status location { name } }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
@@ -203,6 +203,7 @@ def shopify_lines(mapping, since):
             company = (bill.get("company") or "").strip() or ((o.get("customer") or {}).get("displayName") or "").strip() \
                 or (bill.get("name") or "").strip() or PRIVATE
             dom = mail_domain(o.get("email"))
+            ico = re.sub(r"\s", "", (((o.get("customer") or {}).get("ico")) or {}).get("value") or "")
             for li in o["lineItems"]["nodes"]:
                 qty = li["currentQuantity"]
                 vid = (li["variant"] or {}).get("id")
@@ -214,14 +215,14 @@ def shopify_lines(mapping, since):
                 cans, kind = variants[vid]
                 for name, n in cans.items():
                     agg[(day, name, kind, loc)] += n * qty
-                    per_order[(o["name"], day, company, dom, kind, name, loc)] += n * qty
+                    per_order[(o["name"], day, company, ico, dom, kind, name, loc)] += n * qty
         if not page["pageInfo"]["hasNextPage"]:
             break
         after = page["pageInfo"]["endCursor"]
 
     lines = [{"d": d, "k": k, "t": t, "loc": l, "q": q} for (d, k, t, l), q in sorted(agg.items()) if q]
-    orders = [{"o": o, "d": d, "c": c, **({"e": e} if e else {}), "t": t, "k": k, "loc": l, "q": q}
-              for (o, d, c, e, t, k, l), q in sorted(per_order.items()) if q]
+    orders = [{"o": o, "d": d, "c": c, **({"i": i} if i else {}), **({"e": e} if e else {}), "t": t, "k": k, "loc": l, "q": q}
+              for (o, d, c, i, e, t, k, l), q in sorted(per_order.items()) if q]
     return lines, dict(unmapped), n_orders, orders
 
 
