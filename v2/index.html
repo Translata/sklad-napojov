@@ -213,7 +213,7 @@
 
 <script>
 
-const APP_VERSION = "v8.8";
+const APP_VERSION = "v8.9";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -1017,9 +1017,7 @@ function renderCrmTabulka(){
     <div class="tblwrap"><table class="grid"><thead>
       <tr>${T_COLS.map(c => `<th class="srt ${c.t === "num" || c.t === "date" ? "" : "tx"} ${st.k === c.k ? "on" : ""}" onclick="tSort('${c.k}')">${c.l}${st.k === c.k ? (st.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>
       <tr class="flt">${T_COLS.map(c => `<th>${flt(c)}</th>`).join("")}</tr></thead>
-      <tbody id="t-body"></tbody><tfoot id="t-foot"></tfoot></table></div>
-    <p class="muted" style="margin:8px 4px">Klikni na hlavičku stĺpca pre zoradenie. Pri číslach a dátume môžeš filtrovať napr. <b>&gt;0</b>, <b>&lt;=5</b>, <b>=0</b> alebo <b>&gt;1.10.2026</b>.
-      Obrat je len za nápoje, bez poštovného a záloh. Pri Shopify objednávkach starších ako 60 dní obrat chýba, tam je pred sumou znak ≥.</p>`;
+      <tbody id="t-body"></tbody><tfoot id="t-foot"></tfoot></table></div>`;
   tBody();
 }
 
