@@ -44,7 +44,7 @@ query($q: String!, $after: String) {
       fulfillments { status location { name } }
       lineItems(first: 50) {
         pageInfo { hasNextPage }
-        nodes { id title currentQuantity variant { id } taxLines { rate }
+        nodes { id title variantTitle currentQuantity variant { id } taxLines { rate }
           discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } } }
       }
     }
@@ -224,15 +224,19 @@ def shopify_lines(mapping, since):
                     unmapped[li["title"][:60]] += qty
                     continue
                 cans, kind = variants[vid]
+                m = re.search(r"(\d+)\s*cans", li.get("variantTitle") or "")
+                if m and int(m.group(1)) != sum(cans.values()):
+                    scale = int(m.group(1)) / sum(cans.values())
+                    cans = {k: n * scale for k, n in cans.items()}
                 unit = float(li["discountedUnitPriceAfterAllDiscountsSet"]["shopMoney"]["amount"])
                 rate = 1 + sum(float(t["rate"] or 0) for t in li["taxLines"])
                 gross = unit if o.get("taxesIncluded") else unit * rate
                 unit = gross / rate
                 total_cans = sum(cans.values())
                 for name, n in cans.items():
-                    agg[(day, name, kind, loc)] += n * qty
+                    agg[(day, name, kind, loc)] += round(n * qty)
                     key = (o["name"], day, company, ico, dom, kind, name, loc)
-                    per_order[key] += n * qty
+                    per_order[key] += round(n * qty)
                     per_value[key] += unit * qty * n / total_cans
                     per_gross[key] += gross * qty * n / total_cans
         if not page["pageInfo"]["hasNextPage"]:
