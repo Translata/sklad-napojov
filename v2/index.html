@@ -213,7 +213,7 @@
 
 <script>
 
-const APP_VERSION = "v9.0";
+const APP_VERSION = "v9.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -784,12 +784,12 @@ const ownerSelect = rerender => `<select onchange="C.owner=this.value;try{localS
 
 function renderCrmDnes(){
   const el = $("screen-crm-dnes"); if (!crmGuard(el, renderCrmDnes)) return;
-  const t = todayISO(), wk = addDays(t, 7);
+  const t = todayISO();
   const q = norm(C.dq), nx = f => dLocal(f[CF.next]);
-  const list = C.firmy.filter(f => nx(f) && nx(f) <= wk && (!C.owner || f[CF.owner] === C.owner) && (!C.dstatus || f[CF.status] === C.dstatus)
+  const list = C.firmy.filter(f => nx(f) && nx(f) <= t && (!C.owner || f[CF.owner] === C.owner) && (!C.dstatus || f[CF.status] === C.dstatus)
     && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)));
   const desc = (a, b) => nx(b).localeCompare(nx(a)), asc = (a, b) => nx(a).localeCompare(nx(b));
-  const grp = [["Dnes", f => nx(f) === t, asc], ["Po termíne", f => nx(f) < t, desc], ["Do 7 dní", f => nx(f) > t, asc]];
+  const grp = [["Dnes", f => nx(f) === t, asc], ["Po termíne", f => nx(f) < t, desc]];
   let h = `<div class="bar"><h2 style="margin:0 4px;font-size:22px">Na dnes</h2></div>
     <div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.dq)}" oninput="C.dq=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmDnes();const i=document.querySelector('#screen-crm-dnes input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
     <div class="bar" style="justify-content:flex-end;gap:8px"><select onchange="C.dstatus=this.value;renderCrmDnes()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.dstatus ? "selected" : ""}>${s}</option>`).join("")}</select>${ownerSelect("renderCrmDnes")}</div>`;
