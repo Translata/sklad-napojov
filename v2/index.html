@@ -213,7 +213,7 @@
 
 <script>
 
-const APP_VERSION = "v8.9";
+const APP_VERSION = "v9.0";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const MSAL_CONFIG = { auth:{ clientId:"22026742-db1b-4ee6-877a-5b279b1e5775",
   authority:"https://login.microsoftonline.com/35f15dc8-00c9-43d4-99e4-ab82e15ec3bb",
@@ -690,7 +690,7 @@ const PROMO = [["PromoChladMala","Chladnička malá"],["PromoChladVelka","Chladn
   ["PromoPlagaty","Plagáty"],["PromoLetaky","Letáky na stôl"],["PromoReels","Platené reelsko"],["PromoDegustacia","Degustácia"]];
 const STATUS_CLS = { "Lead":"ppp", "SQL":"sql", "Deal":"ok", "No Lead":"neu", "On Hold":"warn" };
 const HIST_TYPES = ["Hovor","Stretnutie","E-mail","Iné"];
-const C = { choices:{}, loaded:false, loading:null, firmy:[], kontakty:[], hist:[], noHist:false, q:"", status:"", owner:"", kq:"", open:null, edit:null, kedit:null, kfirm:null };
+const C = { choices:{}, loaded:false, loading:null, firmy:[], kontakty:[], hist:[], noHist:false, q:"", status:"", owner:"", kq:"", dq:"", dstatus:"", open:null, edit:null, kedit:null, kfirm:null };
 try { C.owner = localStorage.getItem("crm_owner") || ""; } catch(e){}
 
 const listUrl = l => `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/lists/${encodeURIComponent(l)}/items`;
@@ -764,8 +764,8 @@ const optionsOf = field => [...new Set([...(C.choices[field] || []), ...C.firmy.
 const statusChip = s => s ? `<span class="chip ${STATUS_CLS[s] || "neu"}">${esc(s)}</span>` : "";
 function nextBadge(f){
   const n = dLocal(f[CF.next]); if (!n) return "";
-  const t = todayISO(), cls = n < t ? "bad" : n === t ? "warn" : "";
-  return `<div class="muted num" style="${cls === "bad" ? "color:var(--danger);font-weight:600" : cls === "warn" ? "color:var(--warn);font-weight:600" : ""}">${fmtDs(n)}</div>`;
+  const t = todayISO(), col = n < t ? "var(--danger)" : n === t ? "var(--ok)" : "var(--accent)";
+  return `<div class="num" style="color:${col};font-weight:600">${fmtDs(n)}</div>`;
 }
 function firmRow(f){
   return `<div class="mv" onclick="openFirm('${f.id}')"><div class="l"><b>${esc(f[CF.name])}</b>
@@ -785,12 +785,16 @@ const ownerSelect = rerender => `<select onchange="C.owner=this.value;try{localS
 function renderCrmDnes(){
   const el = $("screen-crm-dnes"); if (!crmGuard(el, renderCrmDnes)) return;
   const t = todayISO(), wk = addDays(t, 7);
-  const list = C.firmy.filter(f => dLocal(f[CF.next]) && dLocal(f[CF.next]) <= wk && (!C.owner || f[CF.owner] === C.owner))
-    .sort((a, b) => dLocal(a[CF.next]).localeCompare(dLocal(b[CF.next])));
-  const grp = [["Po termíne", f => dLocal(f[CF.next]) < t], ["Dnes", f => dLocal(f[CF.next]) === t], ["Do 7 dní", f => dLocal(f[CF.next]) > t]];
-  let h = `<div class="bar"><h2 style="margin:0 4px;font-size:22px">Na dnes</h2>${ownerSelect("renderCrmDnes")}</div>`;
-  if (!list.length) h += `<div class="card empty">Nikomu netreba volať.</div>`;
-  grp.forEach(([l, fn]) => { const g = list.filter(fn); if (g.length) h += `<div class="card"><h3>${l} (${g.length})</h3>${g.map(firmRow).join("")}</div>`; });
+  const q = norm(C.dq), nx = f => dLocal(f[CF.next]);
+  const list = C.firmy.filter(f => nx(f) && nx(f) <= wk && (!C.owner || f[CF.owner] === C.owner) && (!C.dstatus || f[CF.status] === C.dstatus)
+    && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)));
+  const desc = (a, b) => nx(b).localeCompare(nx(a)), asc = (a, b) => nx(a).localeCompare(nx(b));
+  const grp = [["Dnes", f => nx(f) === t, asc], ["Po termíne", f => nx(f) < t, desc], ["Do 7 dní", f => nx(f) > t, asc]];
+  let h = `<div class="bar"><h2 style="margin:0 4px;font-size:22px">Na dnes</h2></div>
+    <div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.dq)}" oninput="C.dq=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmDnes();const i=document.querySelector('#screen-crm-dnes input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)"></div>
+    <div class="bar" style="justify-content:flex-end;gap:8px"><select onchange="C.dstatus=this.value;renderCrmDnes()"><option value="">Všetky stavy</option>${STATUS.map(s => `<option ${s === C.dstatus ? "selected" : ""}>${s}</option>`).join("")}</select>${ownerSelect("renderCrmDnes")}</div>`;
+  if (!list.length) h += `<div class="card empty">${q || C.dstatus ? "Nič sa nenašlo." : "Nikomu netreba volať."}</div>`;
+  grp.forEach(([l, fn, so]) => { const g = list.filter(fn).sort(so); if (g.length) h += `<div class="card"><h3>${l} (${g.length})</h3>${g.map(firmRow).join("")}</div>`; });
   el.innerHTML = h;
 }
 
@@ -811,7 +815,7 @@ function renderCrmFirmy(){
   document.querySelector("main").classList.toggle("wide", kan);
   const list = C.firmy.filter(f => (!C.status || f[CF.status] === C.status) && (!C.owner || f[CF.owner] === C.owner)
     && (!q || norm([f[CF.name], f[CF.city], f[CF.ico], ...contactsOf(f).map(kName)].join(" ")).includes(q)))
-    .sort((a, b) => (a[CF.name] || "").localeCompare(b[CF.name] || "", "sk"));
+    .sort((a, b) => dLocal(b[CF.next]).localeCompare(dLocal(a[CF.next])) || (a[CF.name] || "").localeCompare(b[CF.name] || "", "sk"));
   const save = (k, v) => `C.${k}=this.value;try{localStorage.setItem('crm_${k}',this.value)}catch(e){};renderCrmFirmy()`;
   let h = `<div class="bar"><input type="text" placeholder="Hľadať firmu, mesto, kontakt" value="${esc(C.q)}" oninput="C.q=this.value;clearTimeout(C.t);C.t=setTimeout(()=>{renderCrmFirmy();const i=document.querySelector('#screen-crm-firmy input');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)">
     <button class="small" style="flex:0 0 auto" onclick="C.edit='new';go('crm-edit')">+ Firma</button></div>
